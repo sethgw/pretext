@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:pretext/src/document/attributed_span.dart';
 import 'package:pretext/src/document/block.dart';
 import 'package:pretext/src/document/document.dart';
 import 'package:pretext/src/document/document_cursor.dart';
+import 'package:pretext/src/document/span_style.dart';
 import 'package:pretext/src/layout/layout_config.dart';
 import 'package:pretext/src/obstacles/obstacle.dart';
 import 'package:pretext/src/widgets/paged_reader.dart';
@@ -169,6 +171,44 @@ void main() {
       expect(key.currentState!.currentPageIndex, 0);
     });
   });
+
+  group('PagedReader link handling', () {
+    testWidgets('invokes onLinkTap when linked text is tapped', (tester) async {
+      final key = GlobalKey<PagedReaderState>();
+      String? tappedHref;
+      final linkDocument = Document.singleChapter([
+        const ParagraphBlock([
+          AttributedSpan(
+            'Jump ahead',
+            style: SpanStyle(href: 'demo/chapter-2.xhtml'),
+          ),
+          AttributedSpan.plain(' once the dragon clears the page.'),
+        ]),
+      ]);
+      const linkConfig = LayoutConfig(
+        baseTextStyle: TextStyle(fontSize: 16, height: 1.4),
+        lineHeight: 22.4,
+        blockSpacing: 10,
+        margins: EdgeInsets.zero,
+      );
+
+      await tester.pumpWidget(
+        _readerHarness(
+          key: key,
+          document: linkDocument,
+          config: linkConfig,
+          onLinkTap: (href) => tappedHref = href,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final readerTopLeft = tester.getTopLeft(find.byType(PagedReader));
+      await tester.tapAt(readerTopLeft + const Offset(24, 18));
+      await tester.pumpAndSettle();
+
+      expect(tappedHref, 'demo/chapter-2.xhtml');
+    });
+  });
 }
 
 Widget _readerHarness({
@@ -179,6 +219,7 @@ Widget _readerHarness({
   List<Obstacle> Function(int pageIndex, Size pageSize)? obstacleBuilder,
   ProgressStore? progressStore,
   String? bookId,
+  ValueChanged<String>? onLinkTap,
 }) {
   return Directionality(
     textDirection: TextDirection.ltr,
@@ -194,6 +235,7 @@ Widget _readerHarness({
           obstacleBuilder: obstacleBuilder,
           progressStore: progressStore,
           bookId: bookId,
+          onLinkTap: onLinkTap,
         ),
       ),
     ),

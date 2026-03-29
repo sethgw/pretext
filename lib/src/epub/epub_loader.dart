@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:pretext/src/document/attributed_span.dart';
+import 'package:pretext/src/document/block.dart';
 import 'package:pretext/src/document/document.dart';
+import 'package:pretext/src/document/document_cursor.dart';
 import 'package:pretext/src/document/span_style.dart';
 import 'package:pretext/src/epub/content_parser.dart';
 import 'package:pretext/src/epub/css_parser.dart';
@@ -51,6 +54,7 @@ EpubLoadResult loadEpub(Uint8List bytes) {
 
   // --- Step 5: Convert spine items to chapters ---
   final chapters = <Chapter>[];
+  final hrefTargets = <String, DocumentCursor>{};
   for (final spineItem in opf.spine) {
     if (!spineItem.linear) continue;
 
@@ -74,9 +78,23 @@ EpubLoadResult loadEpub(Uint8List bytes) {
       xhtml,
       stylesheet: docStyles.isEmpty ? null : docStyles,
     );
+    final chapter = _normalizeChapterAssets(result.chapter, manifestItem.href);
 
-    if (result.chapter.blocks.isNotEmpty) {
-      chapters.add(result.chapter);
+    if (chapter.blocks.isNotEmpty) {
+      final chapterIndex = chapters.length;
+      chapters.add(chapter);
+      hrefTargets[manifestItem.href] = DocumentCursor(
+        chapterIndex: chapterIndex,
+        blockIndex: 0,
+        textOffset: 0,
+      );
+      for (final anchor in result.anchors.entries) {
+        hrefTargets['${manifestItem.href}#${anchor.key}'] = DocumentCursor(
+          chapterIndex: chapterIndex,
+          blockIndex: anchor.value,
+          textOffset: 0,
+        );
+      }
     }
   }
 
@@ -91,6 +109,7 @@ EpubLoadResult loadEpub(Uint8List bytes) {
     ),
     tableOfContents: toc,
     images: images,
+    hrefTargets: hrefTargets,
   );
 }
 
@@ -209,4 +228,99 @@ Map<String, Uint8List> _extractImages(Archive archive, OpfData opf) {
   }
 
   return images;
+}
+
+Chapter _normalizeChapterAssets(Chapter chapter, String docHref) {
+  return Chapter(
+    title: chapter.title,
+    blocks: _normalizeBlocks(chapter.blocks, docHref),
+  );
+}
+
+List<Block> _normalizeBlocks(List<Block> blocks, String docHref) {
+  return blocks.map((block) => _normalizeBlock(block, docHref)).toList(growable: false);
+}
+
+Block _normalizeBlock(Block block, String docHref) {
+  return switch (block) {
+    ParagraphBlock(:final spans) =>
+      ParagraphBlock(_normalizeSpans(spans, docHref)),
+    HeadingBlock(:final level, :final spans) =>
+      HeadingBlock(level: level, spans: _normalizeSpans(spans, docHref)),
+    ImageBlock(:final src, :final width, :final height, :final alt) =>
+      ImageBlock(
+        src: _resolveBookHref(docHref, src),
+        width: width,
+        height: height,
+        alt: alt,
+      ),
+    BlockquoteBlock(:final children) =>
+      BlockquoteBlock(_normalizeBlocks(children, docHref)),
+    ListBlock(:final ordered, :final items) =>
+      ListBlock(
+        ordered: ordered,
+        items: items
+            .map((item) => _normalizeSpans(item, docHref))
+            .toList(growable: false),
+      ),
+    HorizontalRuleBlock() => block,
+    TableBlock(:final caption, :final rows) =>
+      TableBlock(
+        caption: caption == null ? null : _normalizeSpans(caption, docHref),
+        rows: rows
+            .map(
+              (row) => TableRowData(
+                row.cells
+                    .map(
+                      (cell) => TableCellData(
+                        spans: _normalizeSpans(cell.spans, docHref),
+                        isHeader: cell.isHeader,
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+            )
+            .toList(growable: false),
+      ),
+  };
+}
+
+List<AttributedSpan> _normalizeSpans(List<AttributedSpan> spans, String docHref) {
+  return spans
+      .map((span) {
+        final href = span.style.href;
+        if (href == null || href.isEmpty) {
+          return span;
+        }
+        final resolvedHref = _resolveBookHref(docHref, href);
+        if (resolvedHref == href) {
+          return span;
+        }
+        return AttributedSpan(
+          span.text,
+          style: span.style.copyWith(href: resolvedHref),
+        );
+      })
+      .toList(growable: false);
+}
+
+String _resolveBookHref(String baseHref, String href) {
+  final trimmed = href.trim();
+  if (trimmed.isEmpty) return '';
+
+  final parsed = Uri.parse(trimmed);
+  if (parsed.scheme.isNotEmpty && parsed.scheme != 'file') {
+    return parsed.toString();
+  }
+
+  final resolved = Uri.parse(baseHref).resolve(trimmed);
+  if (resolved.scheme.isNotEmpty && resolved.scheme != 'file') {
+    return resolved.toString();
+  }
+
+  final path = resolved.path.startsWith('/')
+      ? resolved.path.substring(1)
+      : resolved.path;
+  if (resolved.fragment.isEmpty) return path;
+  return '$path#${resolved.fragment}';
 }

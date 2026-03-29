@@ -119,7 +119,9 @@ List<TocEntry> parseToc({
       try {
         final content = readFile(navItem.href);
         final entries = parseNavDocument(content);
-        if (entries.isNotEmpty) return entries;
+        if (entries.isNotEmpty) {
+          return _resolveEntryHrefs(entries, navItem.href);
+        }
       } on Object {
         // Fall through to NCX.
       }
@@ -132,7 +134,7 @@ List<TocEntry> parseToc({
     if (tocItem != null) {
       try {
         final content = readFile(tocItem.href);
-        return parseNcx(content);
+        return _resolveEntryHrefs(parseNcx(content), tocItem.href);
       } on Object {
         return [];
       }
@@ -140,4 +142,32 @@ List<TocEntry> parseToc({
   }
 
   return [];
+}
+
+List<TocEntry> _resolveEntryHrefs(List<TocEntry> entries, String basePath) {
+  return entries
+      .map(
+        (entry) => TocEntry(
+          title: entry.title,
+          href: _resolveHref(basePath, entry.href),
+          children: _resolveEntryHrefs(entry.children, basePath),
+        ),
+      )
+      .toList(growable: false);
+}
+
+String _resolveHref(String basePath, String href) {
+  final trimmed = href.trim();
+  if (trimmed.isEmpty) return '';
+
+  final resolved = Uri.parse(basePath).resolve(trimmed);
+  if (resolved.scheme.isNotEmpty && resolved.scheme != 'file') {
+    return resolved.toString();
+  }
+
+  final path = resolved.path.startsWith('/')
+      ? resolved.path.substring(1)
+      : resolved.path;
+  if (resolved.fragment.isEmpty) return path;
+  return '$path#${resolved.fragment}';
 }

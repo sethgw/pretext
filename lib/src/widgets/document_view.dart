@@ -23,6 +23,7 @@ class DocumentView extends StatefulWidget {
   final Color? backgroundColor;
   final bool debugObstacles;
   final ui.Image? Function(String src)? imageResolver;
+  final ValueChanged<String>? onLinkTap;
 
   const DocumentView({
     super.key,
@@ -33,6 +34,7 @@ class DocumentView extends StatefulWidget {
     this.backgroundColor,
     this.debugObstacles = false,
     this.imageResolver,
+    this.onLinkTap,
   });
 
   @override
@@ -90,8 +92,7 @@ class _DocumentViewState extends State<DocumentView> {
       builder: (context, constraints) {
         final pageSize = constraints.biggest;
         final page = _getPage(pageSize);
-
-        return CustomPaint(
+        final paintedPage = CustomPaint(
           size: pageSize,
           painter: PagePainter(
             page: page,
@@ -100,6 +101,21 @@ class _DocumentViewState extends State<DocumentView> {
             obstacles: widget.obstacles,
             imageResolver: widget.imageResolver,
           ),
+        );
+
+        if (widget.onLinkTap == null) {
+          return paintedPage;
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTapUp: (details) {
+            final href = page.hitTestLink(details.localPosition);
+            if (href != null) {
+              widget.onLinkTap?.call(href);
+            }
+          },
+          child: paintedPage,
         );
       },
     );

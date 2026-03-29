@@ -28,6 +28,7 @@ export 'src/rendering/page_painter.dart';
 
 // Widgets
 export 'src/widgets/document_view.dart';
+export 'src/widgets/epub_reader.dart';
 export 'src/widgets/paged_reader.dart';
 export 'src/widgets/reader_theme.dart';
 export 'src/widgets/toc_drawer.dart';

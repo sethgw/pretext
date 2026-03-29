@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:pretext/src/document/attributed_span.dart';
+import 'package:pretext/src/document/block.dart';
+import 'package:pretext/src/document/document.dart';
 import 'package:pretext/src/document/document_cursor.dart';
+import 'package:pretext/src/document/span_style.dart';
 import 'package:pretext/src/epub/epub_result.dart';
+import 'package:pretext/src/widgets/epub_reader.dart';
+import 'package:pretext/src/widgets/paged_reader.dart';
 import 'package:pretext/src/widgets/progress_store.dart';
 import 'package:pretext/src/widgets/reader_theme.dart';
 import 'package:pretext/src/widgets/toc_drawer.dart';
@@ -263,6 +269,125 @@ void main() {
       expect(tapped, isNotNull);
       expect(tapped!.title, 'Chapter 1');
       expect(tapped!.href, 'ch1.xhtml');
+    });
+  });
+
+  group('EpubReader', () {
+    testWidgets('renders a swipe reader with title and TOC drawer', (tester) async {
+      final book = EpubLoadResult(
+        document: Document(
+          metadata: const DocumentMetadata(title: 'Demo Book'),
+          chapters: [
+            Chapter(
+              blocks: [
+                ParagraphBlock.plain('Chapter one ${'wind and ash ' * 80}'),
+              ],
+            ),
+            Chapter(
+              blocks: [
+                ParagraphBlock.plain('Chapter two ${'wingbeats and fire ' * 80}'),
+              ],
+            ),
+          ],
+        ),
+        tableOfContents: const [
+          TocEntry(title: 'Opening', href: 'chapter1.xhtml'),
+          TocEntry(title: 'Flight', href: 'chapter2.xhtml'),
+        ],
+        hrefTargets: const {
+          'chapter1.xhtml': DocumentCursor(
+            chapterIndex: 0,
+            blockIndex: 0,
+            textOffset: 0,
+          ),
+          'chapter2.xhtml': DocumentCursor(
+            chapterIndex: 1,
+            blockIndex: 0,
+            textOffset: 0,
+          ),
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: EpubReader(
+            book: book,
+            theme: ReaderTheme.sepia,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PagedReader), findsOneWidget);
+      expect(find.text('Demo Book'), findsOneWidget);
+
+      final scaffoldState =
+          tester.firstState<ScaffoldState>(find.byType(Scaffold));
+      scaffoldState.openDrawer();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Opening'), findsOneWidget);
+      expect(find.text('Flight'), findsOneWidget);
+    });
+
+    testWidgets('tapping an internal link jumps forward in the book', (tester) async {
+      final readerKey = GlobalKey<PagedReaderState>();
+
+      final book = EpubLoadResult(
+        document: Document(
+          metadata: const DocumentMetadata(title: 'Linked Book'),
+          chapters: [
+            Chapter(
+              blocks: [
+                ParagraphBlock([
+                  const AttributedSpan(
+                    'Jump to the dragon',
+                    style: SpanStyle(href: 'chapter2.xhtml'),
+                  ),
+                  AttributedSpan.plain(' ${'smoke and ember ' * 600}'),
+                ]),
+              ],
+            ),
+            Chapter(
+              blocks: [
+                ParagraphBlock.plain('Target chapter ${'wingbeats and flame ' * 120}'),
+              ],
+            ),
+          ],
+        ),
+        hrefTargets: const {
+          'chapter2.xhtml': DocumentCursor(
+            chapterIndex: 1,
+            blockIndex: 0,
+            textOffset: 0,
+          ),
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox.expand(
+            child: EpubReader(
+              readerKey: readerKey,
+              book: book,
+              theme: ReaderTheme.light.copyWith(
+                fontSize: 15,
+                margins: const EdgeInsets.all(20),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final readerTopLeft = tester.getTopLeft(find.byType(PagedReader));
+      final initialProgress = readerKey.currentState!.progress;
+
+      await tester.tapAt(readerTopLeft + const Offset(54, 34));
+      await tester.pumpAndSettle();
+
+      expect(readerKey.currentState!.currentPageIndex, greaterThan(0));
+      expect(readerKey.currentState!.progress, greaterThan(initialProgress));
     });
   });
 }

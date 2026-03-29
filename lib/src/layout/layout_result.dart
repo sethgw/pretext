@@ -5,6 +5,19 @@ import 'package:flutter/painting.dart';
 
 import 'package:pretext/src/document/document_cursor.dart';
 
+/// A tappable link range within a laid-out line.
+class LayoutLink {
+  final String href;
+  final int startOffset;
+  final int endOffset;
+
+  const LayoutLink({
+    required this.href,
+    required this.startOffset,
+    required this.endOffset,
+  });
+}
+
 /// A single laid-out line of text, ready to paint.
 ///
 /// Each line carries its own pre-built [ui.Paragraph] from the layout phase,
@@ -42,6 +55,9 @@ class LayoutLine {
   /// Whether this line ends with a hard break (newline / end of block).
   final bool hardBreak;
 
+  /// Tappable link ranges within this line, expressed in line-local text offsets.
+  final List<LayoutLink> links;
+
   const LayoutLine({
     required this.paragraph,
     required this.x,
@@ -53,6 +69,7 @@ class LayoutLine {
     required this.start,
     required this.end,
     required this.hardBreak,
+    this.links = const [],
   });
 
   /// The bounding rect of this line in page-local coordinates.
@@ -73,7 +90,28 @@ class LayoutLine {
       start: start,
       end: end,
       hardBreak: hardBreak,
+      links: links,
     );
+  }
+
+  /// Return the href of the link under [pageOffset], if any.
+  String? hitTestLink(Offset pageOffset) {
+    for (final link in links) {
+      if (link.endOffset <= link.startOffset) continue;
+      final boxes = paragraph.getBoxesForRange(link.startOffset, link.endOffset);
+      for (final box in boxes) {
+        final rect = Rect.fromLTRB(
+          x + box.left,
+          y + box.top,
+          x + box.right,
+          y + box.bottom,
+        ).inflate(2.0);
+        if (rect.contains(pageOffset)) {
+          return link.href;
+        }
+      }
+    }
+    return null;
   }
 }
 
@@ -249,6 +287,17 @@ class LayoutPage {
       rules.isEmpty &&
       dropCaps.isEmpty &&
       tables.isEmpty;
+
+  /// Return the href of the link under [pageOffset], if any.
+  String? hitTestLink(Offset pageOffset) {
+    for (final line in lines) {
+      final href = line.hitTestLink(pageOffset);
+      if (href != null) {
+        return href;
+      }
+    }
+    return null;
+  }
 
   /// Dispose all native paragraph resources owned by this page.
   void dispose() {

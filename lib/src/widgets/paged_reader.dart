@@ -32,6 +32,7 @@ class PagedReader extends StatefulWidget {
   final Color? backgroundColor;
   final bool debugObstacles;
   final ui.Image? Function(String src)? imageResolver;
+  final ValueChanged<String>? onLinkTap;
 
   /// Optional store for persisting reading progress across sessions.
   final ProgressStore? progressStore;
@@ -51,6 +52,7 @@ class PagedReader extends StatefulWidget {
     this.backgroundColor,
     this.debugObstacles = false,
     this.imageResolver,
+    this.onLinkTap,
     this.progressStore,
     this.bookId,
   });
@@ -295,7 +297,7 @@ class PagedReaderState extends State<PagedReader> {
             final obstacles = widget.obstacleBuilder?.call(index, pageSize) ??
                 const [];
 
-            return CustomPaint(
+            final pageWidget = CustomPaint(
               size: pageSize,
               painter: PagePainter(
                 page: page,
@@ -304,6 +306,21 @@ class PagedReaderState extends State<PagedReader> {
                 obstacles: obstacles,
                 imageResolver: widget.imageResolver,
               ),
+            );
+
+            if (widget.onLinkTap == null) {
+              return pageWidget;
+            }
+
+            return GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTapUp: (details) {
+                final href = page.hitTestLink(details.localPosition);
+                if (href != null) {
+                  widget.onLinkTap?.call(href);
+                }
+              },
+              child: pageWidget,
             );
           },
         );

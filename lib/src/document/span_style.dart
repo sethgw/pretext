@@ -42,6 +42,41 @@ class SpanStyle {
 
   bool get isLink => href != null;
 
+  /// Create a modified copy of this style.
+  ///
+  /// Nullable fields keep their current value when omitted.
+  SpanStyle copyWith({
+    bool? bold,
+    bool? italic,
+    double? fontSize,
+    double? fontSizeScale,
+    Color? color,
+    String? fontFamily,
+    String? href,
+    TextDecoration? decoration,
+    double? letterSpacing,
+    double? letterSpacingScale,
+    double? height,
+    double? lineHeightPx,
+    FontWeight? fontWeight,
+  }) {
+    return SpanStyle(
+      bold: bold ?? this.bold,
+      italic: italic ?? this.italic,
+      fontSize: fontSize ?? this.fontSize,
+      fontSizeScale: fontSizeScale ?? this.fontSizeScale,
+      color: color ?? this.color,
+      fontFamily: fontFamily ?? this.fontFamily,
+      href: href ?? this.href,
+      decoration: decoration ?? this.decoration,
+      letterSpacing: letterSpacing ?? this.letterSpacing,
+      letterSpacingScale: letterSpacingScale ?? this.letterSpacingScale,
+      height: height ?? this.height,
+      lineHeightPx: lineHeightPx ?? this.lineHeightPx,
+      fontWeight: fontWeight ?? this.fontWeight,
+    );
+  }
+
   /// Merge another style on top of this one. Non-null fields in [other] win.
   SpanStyle mergeWith(SpanStyle other) {
     final mergedFontSize = _mergeAbsoluteAndScale(

@@ -85,6 +85,7 @@ class LineBreaker {
     final height = lineMetrics.height;
     final ascent = lineMetrics.ascent;
     final baseline = lineMetrics.baseline;
+    final links = _collectLinks(renderSpans);
 
     return LayoutLine(
       paragraph: renderParagraph,
@@ -97,6 +98,7 @@ class LineBreaker {
       start: cursorBase,
       end: cursorBase.advanceBy(lineCharCount),
       hardBreak: lineMetrics.hardBreak,
+      links: links,
     );
   }
   /// Slice spans from [startOffset] for up to [maxChars] characters.
@@ -138,5 +140,36 @@ class LineBreaker {
     }
 
     return result;
+  }
+
+  static List<LayoutLink> _collectLinks(List<AttributedSpan> spans) {
+    final links = <LayoutLink>[];
+    int offset = 0;
+
+    for (final span in spans) {
+      final href = span.style.href;
+      final nextOffset = offset + span.length;
+      if (href != null && href.isNotEmpty && span.length > 0) {
+        if (links.isNotEmpty &&
+            links.last.href == href &&
+            links.last.endOffset == offset) {
+          final previous = links.removeLast();
+          links.add(LayoutLink(
+            href: href,
+            startOffset: previous.startOffset,
+            endOffset: nextOffset,
+          ));
+        } else {
+          links.add(LayoutLink(
+            href: href,
+            startOffset: offset,
+            endOffset: nextOffset,
+          ));
+        }
+      }
+      offset = nextOffset;
+    }
+
+    return links;
   }
 }

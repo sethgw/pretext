@@ -36,6 +36,14 @@ class DemoSelector extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           _DemoTile(
+            title: 'EPUB Reader',
+            subtitle: 'A turnkey swipe reader with TOC navigation and reader theming',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const EpubReaderDemo()),
+            ),
+          ),
+          _DemoTile(
             title: 'Simple Pagination',
             subtitle: 'Text broken into pages with swipe navigation',
             onTap: () => Navigator.push(
@@ -160,6 +168,71 @@ Document _buildDragonDemoDocument() {
   ]);
 }
 
+EpubLoadResult _buildEpubDemoBook() {
+  final sections = _demoText
+      .split('\n\n')
+      .where((p) => p.trim().isNotEmpty)
+      .toList();
+
+  return EpubLoadResult(
+    document: Document(
+      metadata: const DocumentMetadata(
+        title: 'Pretext Reader Sampler',
+        author: 'Pretext',
+      ),
+      chapters: [
+        Chapter(
+          title: 'Opening',
+          blocks: [
+            HeadingBlock(
+              level: 1,
+              spans: [const AttributedSpan.plain('Opening')],
+            ),
+            ParagraphBlock.plain(
+              'This synthetic EPUB demo is here to show the real reader shell: swipe between pages, open the table of contents, and jump between chapters without leaving the native layout engine.',
+            ),
+            ...sections.take(4).map(ParagraphBlock.plain),
+          ],
+        ),
+        Chapter(
+          title: 'Moving Objects',
+          blocks: [
+            HeadingBlock(
+              level: 1,
+              spans: [const AttributedSpan.plain('Moving Objects')],
+            ),
+            ParagraphBlock.plain(
+              'The second chapter leans into the editorial pitch: pagination, chapter navigation, and the same engine that powers obstacle-aware layouts.',
+            ),
+            ...sections.skip(4).take(5).map(ParagraphBlock.plain),
+          ],
+        ),
+      ],
+    ),
+    tableOfContents: const [
+      TocEntry(title: 'Opening', href: 'demo/chapter-1.xhtml'),
+      TocEntry(title: 'Moving Objects', href: 'demo/chapter-2.xhtml#start'),
+    ],
+    hrefTargets: const {
+      'demo/chapter-1.xhtml': DocumentCursor(
+        chapterIndex: 0,
+        blockIndex: 0,
+        textOffset: 0,
+      ),
+      'demo/chapter-2.xhtml': DocumentCursor(
+        chapterIndex: 1,
+        blockIndex: 0,
+        textOffset: 0,
+      ),
+      'demo/chapter-2.xhtml#start': DocumentCursor(
+        chapterIndex: 1,
+        blockIndex: 0,
+        textOffset: 0,
+      ),
+    },
+  );
+}
+
 LayoutConfig _baseConfig(Brightness brightness) {
   return LayoutConfig(
     baseTextStyle: TextStyle(
@@ -185,7 +258,28 @@ LayoutConfig _baseConfig(Brightness brightness) {
 }
 
 // ---------------------------------------------------------------------------
-// Demo 1: Simple Pagination
+// Demo 1: EPUB Reader
+// ---------------------------------------------------------------------------
+
+class EpubReaderDemo extends StatelessWidget {
+  const EpubReaderDemo({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final readerTheme =
+        brightness == Brightness.dark ? ReaderTheme.dark : ReaderTheme.sepia;
+
+    return EpubReader(
+      book: _buildEpubDemoBook(),
+      theme: readerTheme,
+      bookId: 'example-pretext-reader-demo',
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Demo 2: Simple Pagination
 // ---------------------------------------------------------------------------
 
 class SimplePaginationDemo extends StatefulWidget {
@@ -228,7 +322,7 @@ class _SimplePaginationDemoState extends State<SimplePaginationDemo> {
 }
 
 // ---------------------------------------------------------------------------
-// Demo 2: Obstacle Avoidance
+// Demo 3: Obstacle Avoidance
 // ---------------------------------------------------------------------------
 
 class ObstacleDemo extends StatefulWidget {
@@ -326,7 +420,7 @@ class _ObstacleDemoState extends State<ObstacleDemo> {
 }
 
 // ---------------------------------------------------------------------------
-// Demo 3: Dragon Test
+// Demo 4: Dragon Test
 // ---------------------------------------------------------------------------
 
 class DragonDemo extends StatefulWidget {
@@ -409,7 +503,7 @@ class _DragonDemoState extends State<DragonDemo> {
 }
 
 // ---------------------------------------------------------------------------
-// Demo 4: Multi-Column Flow
+// Demo 5: Multi-Column Flow
 // ---------------------------------------------------------------------------
 
 class MultiColumnDemo extends StatelessWidget {
