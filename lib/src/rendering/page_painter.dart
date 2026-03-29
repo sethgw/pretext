@@ -14,6 +14,8 @@ import 'package:pretext/src/obstacles/obstacle.dart';
 /// all layout computation (line breaking, obstacle avoidance, positioning)
 /// has already been done by the layout engine.
 class PagePainter extends CustomPainter {
+  static const _tableCellPadding = 8.0;
+
   final LayoutPage page;
   final Color? backgroundColor;
   final bool debugObstacles;
@@ -77,6 +79,11 @@ class PagePainter extends CustomPainter {
       }
     }
 
+    // Paint tables
+    for (final table in page.tables) {
+      _paintTable(canvas, table);
+    }
+
     // Paint each positioned text line
     for (final line in page.lines) {
       canvas.drawParagraph(line.paragraph, Offset(line.x, line.y));
@@ -119,6 +126,43 @@ class PagePainter extends CustomPainter {
       image.rect.top + (image.rect.height - textPainter.height) / 2,
     );
     textPainter.paint(canvas, textOffset);
+  }
+
+  void _paintTable(Canvas canvas, LayoutTable table) {
+    final headerFillPaint = Paint()..color = const Color(0x0F000000);
+    final cellFillPaint = Paint()..color = const Color(0x05000000);
+    final borderPaint = Paint()
+      ..color = ruleColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    final captionRect = table.captionRect;
+    final captionParagraph = table.captionParagraph;
+    if (captionRect != null && captionParagraph != null) {
+      canvas.drawParagraph(
+        captionParagraph,
+        Offset(captionRect.left, captionRect.top),
+      );
+    }
+
+    for (final cell in table.cells) {
+      canvas.drawRect(
+        cell.rect,
+        cell.isHeader ? headerFillPaint : cellFillPaint,
+      );
+      canvas.drawRect(cell.rect, borderPaint);
+
+      final paragraph = cell.paragraph;
+      if (paragraph != null) {
+        canvas.drawParagraph(
+          paragraph,
+          Offset(
+            cell.rect.left + _tableCellPadding,
+            cell.rect.top + _tableCellPadding,
+          ),
+        );
+      }
+    }
   }
 
   void _paintObstacles(Canvas canvas, Size size) {

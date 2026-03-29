@@ -162,14 +162,183 @@ void main() {
 
       _disposePage(page);
     });
+
+    test('lays out table blocks as grid cells and paginates cleanly', () {
+      const config = LayoutConfig(
+        baseTextStyle: TextStyle(fontSize: 12, height: 1.2),
+        lineHeight: 16,
+        blockSpacing: 8,
+        margins: EdgeInsets.zero,
+      );
+      final document = Document.singleChapter([
+        const TableBlock(
+          caption: [AttributedSpan.plain('Statistics')],
+          rows: [
+            TableRowData([
+              TableCellData(
+                spans: [AttributedSpan.plain('Label')],
+                isHeader: true,
+              ),
+              TableCellData(
+                spans: [AttributedSpan.plain('Value')],
+                isHeader: true,
+              ),
+            ]),
+            TableRowData([
+              TableCellData(spans: [AttributedSpan.plain('Alpha')]),
+              TableCellData(spans: [AttributedSpan.plain('42')]),
+            ]),
+            TableRowData([
+              TableCellData(spans: [AttributedSpan.plain('Beta')]),
+              TableCellData(spans: [AttributedSpan.plain('99')]),
+            ]),
+          ],
+        ),
+      ]);
+
+      final firstPage = layoutPage(
+        document: document,
+        startCursor: document.startCursor,
+        pageSize: const Size(240, 70),
+        config: config,
+      );
+
+      expect(firstPage.tables, hasLength(1));
+      expect(firstPage.tables.first.captionParagraph, isNotNull);
+      expect(firstPage.tables.first.cells, hasLength(2));
+      expect(firstPage.endCursor.blockIndex, 0);
+      expect(firstPage.endCursor.textOffset, greaterThan(0));
+      expect(firstPage.endCursor.isAtBlockEnd(document), isFalse);
+
+      final secondPage = layoutPage(
+        document: document,
+        startCursor: firstPage.endCursor,
+        pageSize: const Size(240, 140),
+        config: config,
+      );
+
+      expect(secondPage.tables, hasLength(1));
+      expect(secondPage.tables.first.captionParagraph, isNull);
+      expect(secondPage.tables.first.cells, hasLength(4));
+      expect(secondPage.endCursor.isAtEnd(document), isTrue);
+
+      _disposePage(firstPage);
+      _disposePage(secondPage);
+    });
+
+    test('sizes table columns from content instead of splitting evenly', () {
+      const config = LayoutConfig(
+        baseTextStyle: TextStyle(fontSize: 12, height: 1.2),
+        lineHeight: 16,
+        blockSpacing: 8,
+        margins: EdgeInsets.zero,
+      );
+      final document = Document.singleChapter([
+        const TableBlock(
+          rows: [
+            TableRowData([
+              TableCellData(
+                spans: [AttributedSpan.plain('Very wide column content')],
+                isHeader: true,
+              ),
+              TableCellData(
+                spans: [AttributedSpan.plain('Narrow')],
+                isHeader: true,
+              ),
+            ]),
+          ],
+        ),
+      ]);
+
+      final page = layoutPage(
+        document: document,
+        startCursor: document.startCursor,
+        pageSize: const Size(240, 120),
+        config: config,
+      );
+
+      expect(page.tables, hasLength(1));
+      final cells = page.tables.first.cells;
+      expect(cells, hasLength(2));
+      expect(cells[0].rect.width, greaterThan(cells[1].rect.width));
+
+      _disposePage(page);
+    });
+
+    test('continues a single table row across pages with block resume state', () {
+      const config = LayoutConfig(
+        baseTextStyle: TextStyle(fontSize: 12, height: 1.2),
+        lineHeight: 16,
+        blockSpacing: 8,
+        margins: EdgeInsets.zero,
+      );
+      final document = Document.singleChapter([
+        TableBlock(
+          rows: [
+            TableRowData([
+              TableCellData(
+                spans: [AttributedSpan.plain('Alpha ' * 32)],
+              ),
+              TableCellData(
+                spans: [AttributedSpan.plain('Beta ' * 32)],
+              ),
+            ]),
+          ],
+        ),
+      ]);
+
+      final firstPage = layoutPage(
+        document: document,
+        startCursor: document.startCursor,
+        pageSize: const Size(240, 34),
+        config: config,
+      );
+
+      expect(firstPage.tables, hasLength(1));
+      expect(firstPage.tables.first.cells, hasLength(2));
+      expect(firstPage.endCursor.blockData, isNotNull);
+      expect(firstPage.endCursor.isAtEnd(document), isFalse);
+
+      final secondPage = layoutPage(
+        document: document,
+        startCursor: firstPage.endCursor,
+        pageSize: const Size(240, 240),
+        config: config,
+      );
+
+      expect(secondPage.tables, hasLength(1));
+      expect(secondPage.tables.first.cells, hasLength(2));
+      expect(secondPage.endCursor.compareTo(firstPage.endCursor), greaterThan(0));
+      expect(
+        secondPage.tables.first.cells[0].rect.width,
+        closeTo(firstPage.tables.first.cells[0].rect.width, 0.01),
+      );
+      expect(
+        secondPage.tables.first.cells[1].rect.width,
+        closeTo(firstPage.tables.first.cells[1].rect.width, 0.01),
+      );
+
+      var cursor = secondPage.endCursor;
+      for (int i = 0; i < 5 && !cursor.isAtEnd(document); i++) {
+        final page = layoutPage(
+          document: document,
+          startCursor: cursor,
+          pageSize: const Size(240, 240),
+          config: config,
+        );
+        expect(page.tables, hasLength(1));
+        expect(page.endCursor.compareTo(cursor), greaterThan(0));
+        cursor = page.endCursor;
+        _disposePage(page);
+      }
+      expect(cursor.isAtEnd(document), isTrue);
+
+      _disposePage(firstPage);
+      _disposePage(secondPage);
+    });
   });
 }
 
 void _disposePage(LayoutPage page) {
-  for (final line in page.lines) {
-    line.paragraph.dispose();
-  }
-  for (final dropCap in page.dropCaps) {
-    dropCap.paragraph.dispose();
-  }
+  page.dispose();
 }

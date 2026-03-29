@@ -11,17 +11,20 @@ class DocumentCursor implements Comparable<DocumentCursor> {
   final int chapterIndex;
   final int blockIndex;
   final int textOffset;
+  final String? blockData;
 
   const DocumentCursor({
     required this.chapterIndex,
     required this.blockIndex,
     required this.textOffset,
+    this.blockData,
   });
 
   const DocumentCursor.zero()
       : chapterIndex = 0,
         blockIndex = 0,
-        textOffset = 0;
+        textOffset = 0,
+        blockData = null;
 
   /// Whether this cursor is at the very start of the document.
   bool get isAtStart =>
@@ -54,6 +57,7 @@ class DocumentCursor implements Comparable<DocumentCursor> {
         chapterIndex: chapterIndex,
         blockIndex: blockIndex + 1,
         textOffset: 0,
+        blockData: null,
       );
     }
     // Move to next chapter
@@ -61,6 +65,7 @@ class DocumentCursor implements Comparable<DocumentCursor> {
       chapterIndex: chapterIndex + 1,
       blockIndex: 0,
       textOffset: 0,
+      blockData: null,
     );
   }
 
@@ -70,6 +75,7 @@ class DocumentCursor implements Comparable<DocumentCursor> {
       chapterIndex: chapterIndex,
       blockIndex: blockIndex,
       textOffset: textOffset + chars,
+      blockData: null,
     );
   }
 
@@ -93,16 +99,20 @@ class DocumentCursor implements Comparable<DocumentCursor> {
   }
 
   /// Serialize to a string for persistence.
-  String serialize() => '$chapterIndex:$blockIndex:$textOffset';
+  String serialize() => blockData == null
+      ? '$chapterIndex:$blockIndex:$textOffset'
+      : '$chapterIndex:$blockIndex:$textOffset|$blockData';
 
   /// Deserialize from a string.
   static DocumentCursor deserialize(String s) {
-    final parts = s.split(':');
+    final blockDataSplit = s.split('|');
+    final parts = blockDataSplit.first.split(':');
     if (parts.length != 3) return const DocumentCursor.zero();
     return DocumentCursor(
       chapterIndex: int.tryParse(parts[0]) ?? 0,
       blockIndex: int.tryParse(parts[1]) ?? 0,
       textOffset: int.tryParse(parts[2]) ?? 0,
+      blockData: blockDataSplit.length > 1 ? blockDataSplit.sublist(1).join('|') : null,
     );
   }
 
@@ -112,7 +122,12 @@ class DocumentCursor implements Comparable<DocumentCursor> {
     if (c != 0) return c;
     final b = blockIndex.compareTo(other.blockIndex);
     if (b != 0) return b;
-    return textOffset.compareTo(other.textOffset);
+    final t = textOffset.compareTo(other.textOffset);
+    if (t != 0) return t;
+    if (blockData == other.blockData) return 0;
+    if (blockData == null) return -1;
+    if (other.blockData == null) return 1;
+    return blockData!.compareTo(other.blockData!);
   }
 
   @override
@@ -121,12 +136,13 @@ class DocumentCursor implements Comparable<DocumentCursor> {
       other is DocumentCursor &&
           chapterIndex == other.chapterIndex &&
           blockIndex == other.blockIndex &&
-          textOffset == other.textOffset;
+          textOffset == other.textOffset &&
+          blockData == other.blockData;
 
   @override
-  int get hashCode => Object.hash(chapterIndex, blockIndex, textOffset);
+  int get hashCode => Object.hash(chapterIndex, blockIndex, textOffset, blockData);
 
   @override
   String toString() =>
-      'DocumentCursor(ch: $chapterIndex, block: $blockIndex, offset: $textOffset)';
+      'DocumentCursor(ch: $chapterIndex, block: $blockIndex, offset: $textOffset, blockData: $blockData)';
 }

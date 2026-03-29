@@ -6,6 +6,7 @@ import 'package:pretext/src/document/attributed_span.dart';
 import 'package:pretext/src/document/block.dart';
 import 'package:pretext/src/document/document_cursor.dart';
 import 'package:pretext/src/layout/layout_result.dart';
+import 'package:pretext/src/layout/rich_paragraph.dart';
 
 /// The core line-breaking engine — Flutter's adaptation of Pretext's
 /// `layoutNextLine()`.
@@ -48,8 +49,12 @@ class LineBreaker {
     if (totalChars == 0) return null;
 
     // Build a measurement paragraph with 2 lines so we can detect overflow
-    final measureParagraph =
-        _buildParagraph(slicedSpans, baseStyle, maxLines: 2);
+    final measureParagraph = buildRichParagraph(
+      spans: slicedSpans,
+      baseStyle: baseStyle,
+      textDirection: textDirection,
+      maxLines: 2,
+    );
     measureParagraph.layout(ui.ParagraphConstraints(width: maxWidth));
 
     final lineMetrics = measureParagraph.getLineMetricsAt(0);
@@ -68,7 +73,11 @@ class LineBreaker {
 
     // Build a tight rendering paragraph with just this line's text
     final renderSpans = _sliceSpans(spans, textOffset, lineCharCount);
-    final renderParagraph = _buildParagraph(renderSpans, baseStyle);
+    final renderParagraph = buildRichParagraph(
+      spans: renderSpans,
+      baseStyle: baseStyle,
+      textDirection: textDirection,
+    );
     renderParagraph.layout(ui.ParagraphConstraints(width: maxWidth));
 
     final renderMetrics = renderParagraph.getLineMetricsAt(0);
@@ -90,34 +99,6 @@ class LineBreaker {
       hardBreak: lineMetrics.hardBreak,
     );
   }
-
-  /// Build a [ui.Paragraph] from a list of spans.
-  ui.Paragraph _buildParagraph(
-    List<AttributedSpan> spans,
-    TextStyle baseStyle, {
-    int? maxLines,
-  }) {
-    final builder = ui.ParagraphBuilder(
-      ui.ParagraphStyle(
-        textDirection: textDirection,
-        maxLines: maxLines,
-        fontSize: baseStyle.fontSize,
-        fontFamily: baseStyle.fontFamily,
-        fontWeight: baseStyle.fontWeight,
-        fontStyle: baseStyle.fontStyle,
-        height: baseStyle.height,
-      ),
-    );
-
-    for (final span in spans) {
-      builder.pushStyle(span.style.toUiTextStyle(baseStyle));
-      builder.addText(span.text);
-      builder.pop();
-    }
-
-    return builder.build();
-  }
-
   /// Slice spans from [startOffset] for up to [maxChars] characters.
   ///
   /// Returns a list of spans that cover the character range

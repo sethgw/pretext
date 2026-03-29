@@ -52,6 +52,14 @@ class DemoSelector extends StatelessWidget {
             ),
           ),
           _DemoTile(
+            title: 'Dragon Test',
+            subtitle: 'The main demo: a dragon cuts through the page and the text bends around it',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DragonDemo()),
+            ),
+          ),
+          _DemoTile(
             title: 'Multi-Column Flow',
             subtitle: 'Two-column layout with cursor handoff between columns',
             onTap: () => Navigator.push(
@@ -127,6 +135,28 @@ Document _buildDemoDocument() {
       spans: [const AttributedSpan.plain('The Future of Text Layout')],
     ),
     ...paragraphs.map((p) => ParagraphBlock.plain(p)),
+  ]);
+}
+
+Document _buildDragonDemoDocument() {
+  final intro = ParagraphBlock.plain(
+    'The dragon test is the canonical Pretext demo: a moving object crosses the page, and the text has to discover the remaining open space line by line. Swipe forward and the dragon advances farther to the right on each page.',
+  );
+
+  final body = _demoText
+      .split('\n\n')
+      .where((p) => p.trim().isNotEmpty)
+      .take(8)
+      .map(ParagraphBlock.plain)
+      .toList();
+
+  return Document.singleChapter([
+    HeadingBlock(
+      level: 1,
+      spans: [const AttributedSpan.plain('The Dragon Test')],
+    ),
+    intro,
+    ...body,
   ]);
 }
 
@@ -296,7 +326,90 @@ class _ObstacleDemoState extends State<ObstacleDemo> {
 }
 
 // ---------------------------------------------------------------------------
-// Demo 3: Multi-Column Flow
+// Demo 3: Dragon Test
+// ---------------------------------------------------------------------------
+
+class DragonDemo extends StatefulWidget {
+  const DragonDemo({super.key});
+
+  @override
+  State<DragonDemo> createState() => _DragonDemoState();
+}
+
+class _DragonDemoState extends State<DragonDemo> {
+  final _document = _buildDragonDemoDocument();
+  int _pageIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final bgColor = brightness == Brightness.dark
+        ? const Color(0xFF1E1E1E)
+        : const Color(0xFFFAF7F2);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Dragon Test')),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            color: brightness == Brightness.dark
+                ? const Color(0xFF151515)
+                : const Color(0xFFF2E6D6),
+            child: Text(
+              'Swipe through the book. Each page moves the dragon farther across the spread, and every line has to reflow around the body, wing, and tail.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                height: 1.45,
+                color: brightness == Brightness.dark
+                    ? const Color(0xFFE8D5B6)
+                    : const Color(0xFF5B2C18),
+              ),
+            ),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final pageSize = constraints.biggest;
+                final dragon = _dragonObstacleForPage(_pageIndex, pageSize);
+
+                return Stack(
+                  children: [
+                    PagedReader(
+                      document: _document,
+                      config: _baseConfig(brightness),
+                      backgroundColor: bgColor,
+                      obstacleBuilder: (pageIndex, pageSize) => [
+                        _dragonObstacleForPage(pageIndex, pageSize),
+                      ],
+                      onPageChanged: (pageIndex) {
+                        setState(() {
+                          _pageIndex = pageIndex;
+                        });
+                      },
+                    ),
+                    IgnorePointer(
+                      child: CustomPaint(
+                        size: pageSize,
+                        painter: _DragonOverlayPainter(
+                          dragon: dragon,
+                          brightness: brightness,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Demo 4: Multi-Column Flow
 // ---------------------------------------------------------------------------
 
 class MultiColumnDemo extends StatelessWidget {
@@ -335,5 +448,172 @@ class MultiColumnDemo extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+PolygonObstacle _dragonObstacleForPage(int pageIndex, Size pageSize) {
+  final dragonWidth = (pageSize.width * 0.46).clamp(170.0, 250.0).toDouble();
+  final dragonHeight = dragonWidth * 1.18;
+  final x = pageSize.width * 0.06 + pageIndex * dragonWidth * 0.42;
+  final y = (pageSize.height * 0.10).clamp(52.0, 110.0).toDouble();
+
+  return PolygonObstacle(
+    points: [
+      (x: x + dragonWidth * 0.15, y: y + dragonHeight * 0.11),
+      (x: x + dragonWidth * 0.54, y: y + dragonHeight * 0.00),
+      (x: x + dragonWidth * 0.92, y: y + dragonHeight * 0.17),
+      (x: x + dragonWidth * 0.80, y: y + dragonHeight * 0.48),
+      (x: x + dragonWidth * 1.02, y: y + dragonHeight * 0.69),
+      (x: x + dragonWidth * 0.71, y: y + dragonHeight * 0.89),
+      (x: x + dragonWidth * 0.48, y: y + dragonHeight * 0.77),
+      (x: x + dragonWidth * 0.29, y: y + dragonHeight * 0.99),
+      (x: x + dragonWidth * 0.06, y: y + dragonHeight * 0.75),
+      (x: x + dragonWidth * 0.00, y: y + dragonHeight * 0.48),
+    ],
+    horizontalPadding: 12,
+    verticalPadding: 6,
+  );
+}
+
+class _DragonOverlayPainter extends CustomPainter {
+  final PolygonObstacle dragon;
+  final Brightness brightness;
+
+  const _DragonOverlayPainter({
+    required this.dragon,
+    required this.brightness,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (dragon.points.length < 3) {
+      return;
+    }
+
+    final path = Path()..moveTo(dragon.points.first.x, dragon.points.first.y);
+    for (int i = 1; i < dragon.points.length; i++) {
+      path.lineTo(dragon.points[i].x, dragon.points[i].y);
+    }
+    path.close();
+
+    final bounds = path.getBounds();
+    final shadowColor = brightness == Brightness.dark
+        ? const Color(0xAA160705)
+        : const Color(0x55160705);
+    final strokeColor = brightness == Brightness.dark
+        ? const Color(0xFFD8A96B)
+        : const Color(0xFF7B2B11);
+    final flameOuter = brightness == Brightness.dark
+        ? const Color(0x99FF9E39)
+        : const Color(0x88D76A21);
+    final flameInner = brightness == Brightness.dark
+        ? const Color(0xCCFFE3A2)
+        : const Color(0xCCFFD27A);
+
+    canvas.drawShadow(path, shadowColor, 14, false);
+
+    final bodyPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: brightness == Brightness.dark
+            ? const [
+                Color(0xCCB84D2D),
+                Color(0xCC81211A),
+                Color(0xCC220A07),
+              ]
+            : const [
+                Color(0xCCDA7C42),
+                Color(0xCCAA3A20),
+                Color(0xCC4A170F),
+              ],
+      ).createShader(bounds.inflate(12));
+
+    final strokePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..color = strokeColor;
+
+    canvas.drawPath(path, bodyPaint);
+    canvas.drawPath(path, strokePaint);
+
+    final spinePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = strokeColor.withValues(alpha: 0.55);
+    final spinePath = Path()
+      ..moveTo(bounds.left + bounds.width * 0.24, bounds.top + bounds.height * 0.22)
+      ..quadraticBezierTo(
+        bounds.left + bounds.width * 0.48,
+        bounds.top - bounds.height * 0.04,
+        bounds.left + bounds.width * 0.76,
+        bounds.top + bounds.height * 0.20,
+      )
+      ..quadraticBezierTo(
+        bounds.left + bounds.width * 0.66,
+        bounds.top + bounds.height * 0.40,
+        bounds.left + bounds.width * 0.82,
+        bounds.top + bounds.height * 0.58,
+      );
+    canvas.drawPath(spinePath, spinePaint);
+
+    final eyeCenter = Offset(
+      bounds.left + bounds.width * 0.84,
+      bounds.top + bounds.height * 0.57,
+    );
+    canvas.drawCircle(
+      eyeCenter,
+      4.0,
+      Paint()..color = const Color(0xFFFFE08A),
+    );
+    canvas.drawCircle(
+      eyeCenter.translate(1.2, 0),
+      1.2,
+      Paint()..color = const Color(0xFF220A07),
+    );
+
+    final flameBase = Offset(
+      bounds.right - bounds.width * 0.02,
+      bounds.top + bounds.height * 0.66,
+    );
+    final flamePath = Path()
+      ..moveTo(flameBase.dx, flameBase.dy)
+      ..quadraticBezierTo(
+        flameBase.dx + 18,
+        flameBase.dy - 12,
+        flameBase.dx + 34,
+        flameBase.dy - 2,
+      )
+      ..quadraticBezierTo(
+        flameBase.dx + 18,
+        flameBase.dy + 10,
+        flameBase.dx,
+        flameBase.dy + 8,
+      )
+      ..close();
+    canvas.drawPath(flamePath, Paint()..color = flameOuter);
+
+    final innerFlamePath = Path()
+      ..moveTo(flameBase.dx + 2, flameBase.dy + 2)
+      ..quadraticBezierTo(
+        flameBase.dx + 13,
+        flameBase.dy - 5,
+        flameBase.dx + 23,
+        flameBase.dy + 0,
+      )
+      ..quadraticBezierTo(
+        flameBase.dx + 14,
+        flameBase.dy + 6,
+        flameBase.dx + 2,
+        flameBase.dy + 6,
+      )
+      ..close();
+    canvas.drawPath(innerFlamePath, Paint()..color = flameInner);
+  }
+
+  @override
+  bool shouldRepaint(covariant _DragonOverlayPainter oldDelegate) {
+    return !identical(dragon, oldDelegate.dragon) ||
+        brightness != oldDelegate.brightness;
   }
 }

@@ -33,6 +33,7 @@ LayoutPage layoutMultiColumnPage({
   final allImages = <LayoutImage>[];
   final allRules = <LayoutRule>[];
   final allDropCaps = <LayoutDropCap>[];
+  final allTables = <LayoutTable>[];
   var cursor = startCursor;
 
   for (int col = 0; col < columnCount; col++) {
@@ -83,6 +84,17 @@ LayoutPage layoutMultiColumnPage({
         y: dropCap.y + contentRect.top,
       ));
     }
+    for (final table in colPage.tables) {
+      allTables.add(table.copyWith(
+        rect: table.rect.shift(Offset(colX, contentRect.top)),
+        captionRect: table.captionRect?.shift(Offset(colX, contentRect.top)),
+        cells: table.cells
+            .map((cell) => cell.copyWith(
+                  rect: cell.rect.shift(Offset(colX, contentRect.top)),
+                ))
+            .toList(),
+      ));
+    }
 
     // Hand off cursor to next column
     cursor = colPage.endCursor;
@@ -93,6 +105,7 @@ LayoutPage layoutMultiColumnPage({
     images: allImages,
     rules: allRules,
     dropCaps: allDropCaps,
+    tables: allTables,
     startCursor: startCursor,
     endCursor: cursor,
     size: pageSize,

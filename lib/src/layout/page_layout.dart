@@ -10,6 +10,7 @@ import 'package:pretext/src/document/document_cursor.dart';
 import 'package:pretext/src/layout/layout_config.dart';
 import 'package:pretext/src/layout/layout_result.dart';
 import 'package:pretext/src/layout/line_breaker.dart';
+import 'package:pretext/src/layout/rich_paragraph.dart';
 import 'package:pretext/src/obstacles/interval_solver.dart';
 import 'package:pretext/src/obstacles/obstacle.dart';
 
@@ -42,6 +43,7 @@ LayoutPage layoutPage({
   final images = <LayoutImage>[];
   final rules = <LayoutRule>[];
   final dropCaps = <LayoutDropCap>[];
+  final tables = <LayoutTable>[];
   double y = contentRect.top;
   var cursor = startCursor;
 
@@ -96,6 +98,28 @@ LayoutPage layoutPage({
       ));
       y += ruleHeight;
       cursor = cursor.nextBlock(document);
+      continue;
+    }
+
+    // --- TableBlock: lay out caption and rows as a real grid ---
+    if (block is TableBlock) {
+      final tableLayout = _layoutTableBlock(
+        block: block,
+        cursor: cursor,
+        y: y,
+        contentRect: contentRect,
+        config: config,
+        lineBreaker: lineBreaker,
+      );
+      if (tableLayout == null) break;
+
+      tables.add(tableLayout.table);
+      cursor = tableLayout.endCursor;
+      y += tableLayout.height;
+      if (cursor.isAtBlockEnd(document)) {
+        cursor = cursor.nextBlock(document);
+        y += config.blockSpacing;
+      }
       continue;
     }
 
@@ -228,6 +252,7 @@ LayoutPage layoutPage({
     images: images,
     rules: rules,
     dropCaps: dropCaps,
+    tables: tables,
     startCursor: startCursor,
     endCursor: cursor,
     size: pageSize,
@@ -309,6 +334,89 @@ class _BandLayout {
   });
 
   bool get producedContent => lines.isNotEmpty;
+}
+
+const _tableCellPadding = 8.0;
+const _tableCaptionSpacing = 6.0;
+const _tableMinimumColumnWidth = 48.0;
+
+class _TableBlockLayout {
+  final LayoutTable table;
+  final double height;
+  final DocumentCursor endCursor;
+
+  const _TableBlockLayout({
+    required this.table,
+    required this.height,
+    required this.endCursor,
+  });
+}
+
+class _TableStartState {
+  final bool includeCaption;
+  final int rowIndex;
+  final List<int> cellOffsets;
+
+  const _TableStartState({
+    required this.includeCaption,
+    required this.rowIndex,
+    required this.cellOffsets,
+  });
+}
+
+class _TableRowFragment {
+  final List<LayoutTableCell> cells;
+  final double height;
+  final List<int> consumedByCell;
+  final bool isCompleteRow;
+
+  const _TableRowFragment({
+    required this.cells,
+    required this.height,
+    required this.consumedByCell,
+    required this.isCompleteRow,
+  });
+}
+
+class _MeasuredCellLine {
+  final int charsConsumed;
+  final double height;
+
+  const _MeasuredCellLine({
+    required this.charsConsumed,
+    required this.height,
+  });
+}
+
+class _TableCursorState {
+  final int rowIndex;
+  final List<int> cellOffsets;
+
+  const _TableCursorState({
+    required this.rowIndex,
+    required this.cellOffsets,
+  });
+
+  String encode() => 'table:$rowIndex:${cellOffsets.join(',')}';
+
+  static _TableCursorState? decode(String? value) {
+    if (value == null || !value.startsWith('table:')) return null;
+    final parts = value.split(':');
+    if (parts.length != 3) return null;
+
+    final rowIndex = int.tryParse(parts[1]);
+    if (rowIndex == null) return null;
+
+    final offsets = parts[2].isEmpty
+        ? const <int>[]
+        : parts[2].split(',').map(int.tryParse).toList();
+    if (offsets.any((offset) => offset == null)) return null;
+
+    return _TableCursorState(
+      rowIndex: rowIndex,
+      cellOffsets: offsets.cast<int>(),
+    );
+  }
 }
 
 /// Resolve the spans, style, and local offset for a position within [block].
@@ -446,6 +554,493 @@ double _estimatedBandHeight(TextStyle style, double fallbackLineHeight) {
   final lineHeight = style.height ?? 1.0;
   final estimated = fontSize * lineHeight;
   return math.max(fallbackLineHeight, estimated);
+}
+
+_TableBlockLayout? _layoutTableBlock({
+  required TableBlock block,
+  required DocumentCursor cursor,
+  required double y,
+  required Rect contentRect,
+  required LayoutConfig config,
+  required LineBreaker lineBreaker,
+}) {
+  if (block.captionTextLength == 0 && block.rows.isEmpty) {
+    return null;
+  }
+
+  final start = _resolveTableStart(block, cursor);
+  final tableWidth = contentRect.width;
+  final columnWidths = _computeTableColumnWidths(
+    block: block,
+    tableWidth: tableWidth,
+    config: config,
+  );
+  final cells = <LayoutTableCell>[];
+  Rect? captionRect;
+  ui.Paragraph? captionParagraph;
+  double currentY = y;
+  int consumedChars = 0;
+  var rowSpacingPending = false;
+
+  if (start.includeCaption && block.caption != null && block.caption!.isNotEmpty) {
+    final captionStyle = config.baseTextStyle.copyWith(
+      fontStyle: FontStyle.italic,
+      fontWeight: FontWeight.w600,
+    );
+    final paragraph = layoutRichParagraph(
+      spans: block.caption!,
+      baseStyle: captionStyle,
+      textDirection: config.textDirection,
+      width: tableWidth,
+    );
+    final captionHeight = math.max(paragraph.height, config.lineHeight);
+    final fitsCaption =
+        currentY + captionHeight <= contentRect.bottom ||
+        (currentY == y && y == contentRect.top);
+    if (!fitsCaption) {
+      paragraph.dispose();
+      return null;
+    }
+
+    captionParagraph = paragraph;
+    captionRect = Rect.fromLTWH(
+      contentRect.left,
+      currentY,
+      tableWidth,
+      captionHeight,
+    );
+    currentY += captionHeight;
+    consumedChars += block.captionTextLength;
+    if (start.rowIndex < block.rows.length) {
+      rowSpacingPending = true;
+    }
+  }
+
+  DocumentCursor? partialEndCursor;
+  for (int rowIndex = start.rowIndex; rowIndex < block.rows.length; rowIndex++) {
+    final rowTop = currentY + (rowSpacingPending ? _tableCaptionSpacing : 0);
+    final rowOffsets = rowIndex == start.rowIndex
+        ? List<int>.of(start.cellOffsets)
+        : List<int>.filled(block.rows[rowIndex].cells.length, 0);
+    final rowLayout = _buildTableRowFragment(
+      row: block.rows[rowIndex],
+      cellOffsets: rowOffsets,
+      top: rowTop,
+      left: contentRect.left,
+      columnWidths: columnWidths,
+      config: config,
+      lineBreaker: lineBreaker,
+      availableHeight: contentRect.bottom - rowTop,
+      allowOversizeFirstBand:
+          captionParagraph == null && cells.isEmpty && rowTop == contentRect.top,
+    );
+    if (rowLayout == null) {
+      break;
+    }
+
+    if (rowSpacingPending) {
+      currentY += _tableCaptionSpacing;
+      rowSpacingPending = false;
+    }
+    cells.addAll(rowLayout.cells);
+    currentY += rowLayout.height;
+    consumedChars += rowLayout.consumedByCell.fold(0, (sum, chars) => sum + chars);
+
+    if (!rowLayout.isCompleteRow) {
+      partialEndCursor = DocumentCursor(
+        chapterIndex: cursor.chapterIndex,
+        blockIndex: cursor.blockIndex,
+        textOffset: cursor.textOffset + consumedChars,
+        blockData: _TableCursorState(
+          rowIndex: rowIndex,
+          cellOffsets: [
+            for (int i = 0; i < block.rows[rowIndex].cells.length; i++)
+              rowOffsets[i] + rowLayout.consumedByCell[i],
+          ],
+        ).encode(),
+      );
+      break;
+    }
+  }
+
+  if (captionParagraph == null && cells.isEmpty) {
+    return null;
+  }
+
+  final endCursor = partialEndCursor ??
+      DocumentCursor(
+        chapterIndex: cursor.chapterIndex,
+        blockIndex: cursor.blockIndex,
+        textOffset: cursor.textOffset + consumedChars,
+      );
+
+  return _TableBlockLayout(
+    table: LayoutTable(
+      rect: Rect.fromLTWH(contentRect.left, y, tableWidth, currentY - y),
+      captionRect: captionRect,
+      captionParagraph: captionParagraph,
+      cells: cells,
+    ),
+    height: currentY - y,
+    endCursor: endCursor,
+  );
+}
+
+_TableStartState _resolveTableStart(
+  TableBlock block,
+  DocumentCursor cursor,
+) {
+  final partialState = _TableCursorState.decode(cursor.blockData);
+  if (partialState != null &&
+      partialState.rowIndex >= 0 &&
+      partialState.rowIndex < block.rows.length) {
+    final row = block.rows[partialState.rowIndex];
+    final normalizedOffsets = <int>[
+      for (int i = 0; i < row.cells.length; i++)
+        i < partialState.cellOffsets.length
+            ? partialState.cellOffsets[i].clamp(0, row.cells[i].textLength)
+            : 0,
+    ];
+    return _TableStartState(
+      includeCaption: false,
+      rowIndex: partialState.rowIndex,
+      cellOffsets: normalizedOffsets,
+    );
+  }
+
+  final textOffset = cursor.textOffset;
+  final captionLength = block.captionTextLength;
+  if (captionLength > 0 && textOffset < captionLength) {
+    return _TableStartState(
+      includeCaption: true,
+      rowIndex: 0,
+      cellOffsets: block.rows.isEmpty
+          ? const []
+          : List<int>.filled(block.rows.first.cells.length, 0),
+    );
+  }
+
+  var consumed = captionLength;
+  for (int rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
+    final rowLength = block.rows[rowIndex].textLength;
+    if (textOffset < consumed + rowLength) {
+      return _TableStartState(
+        includeCaption: false,
+        rowIndex: rowIndex,
+        cellOffsets: List<int>.filled(block.rows[rowIndex].cells.length, 0),
+      );
+    }
+    consumed += rowLength;
+  }
+
+  return _TableStartState(
+    includeCaption: false,
+    rowIndex: block.rows.length,
+    cellOffsets: const [],
+  );
+}
+
+_TableRowFragment? _buildTableRowFragment({
+  required TableRowData row,
+  required List<int> cellOffsets,
+  required double top,
+  required double left,
+  required List<double> columnWidths,
+  required LayoutConfig config,
+  required LineBreaker lineBreaker,
+  required double availableHeight,
+  required bool allowOversizeFirstBand,
+}) {
+  final columnCount = columnWidths.length;
+  final consumedByCell = List<int>.filled(row.cells.length, 0);
+  var textHeight = 0.0;
+  var bandCount = 0;
+
+  while (true) {
+    final nextBand = <_MeasuredCellLine?>[];
+    var bandHeight = 0.0;
+    var hasContent = false;
+
+    for (int columnIndex = 0; columnIndex < row.cells.length; columnIndex++) {
+      final cell = row.cells[columnIndex];
+      final nextOffset = cellOffsets[columnIndex] + consumedByCell[columnIndex];
+      if (nextOffset >= cell.textLength) {
+        nextBand.add(null);
+        continue;
+      }
+
+      final baseStyle = cell.isHeader
+          ? config.baseTextStyle.copyWith(fontWeight: FontWeight.bold)
+          : config.baseTextStyle;
+      final line = _measureNextCellLine(
+        spans: cell.spans,
+        textOffset: nextOffset,
+        baseStyle: baseStyle,
+        maxWidth: _tableParagraphWidthForColumn(columnWidths, columnIndex),
+        lineBreaker: lineBreaker,
+      );
+      nextBand.add(line);
+      if (line != null) {
+        hasContent = true;
+        bandHeight = math.max(bandHeight, line.height);
+      }
+    }
+
+    if (!hasContent) break;
+
+    final candidateHeight = _tableCellPadding * 2 + textHeight + bandHeight;
+    if (candidateHeight > availableHeight &&
+        !(bandCount == 0 && allowOversizeFirstBand)) {
+      break;
+    }
+
+    textHeight += bandHeight;
+    bandCount++;
+    for (int columnIndex = 0; columnIndex < row.cells.length; columnIndex++) {
+      final line = nextBand[columnIndex];
+      if (line != null) {
+        consumedByCell[columnIndex] += line.charsConsumed;
+      }
+    }
+  }
+
+  if (consumedByCell.every((chars) => chars == 0)) {
+    return null;
+  }
+
+  final rowHeight = _tableCellPadding * 2 + textHeight;
+
+  final cells = <LayoutTableCell>[];
+  var currentX = left;
+  for (int columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+    final columnWidth = columnWidths[columnIndex];
+    ui.Paragraph? paragraph;
+    var isHeader = false;
+    if (columnIndex < row.cells.length) {
+      final cell = row.cells[columnIndex];
+      isHeader = cell.isHeader;
+      final consumedChars = consumedByCell[columnIndex];
+      if (consumedChars > 0) {
+        final baseStyle = cell.isHeader
+            ? config.baseTextStyle.copyWith(fontWeight: FontWeight.bold)
+            : config.baseTextStyle;
+        paragraph = layoutRichParagraph(
+          spans: _sliceAttributedSpans(
+            cell.spans,
+            cellOffsets[columnIndex],
+            consumedChars,
+          ),
+          baseStyle: baseStyle,
+          textDirection: config.textDirection,
+          width: _tableParagraphWidthForColumn(columnWidths, columnIndex),
+        );
+      }
+    }
+
+    cells.add(LayoutTableCell(
+      rect: Rect.fromLTWH(
+        currentX,
+        top,
+        columnWidth,
+        rowHeight,
+      ),
+      paragraph: paragraph,
+      isHeader: isHeader,
+    ));
+    currentX += columnWidth;
+  }
+
+  return _TableRowFragment(
+    cells: cells,
+    height: rowHeight,
+    consumedByCell: consumedByCell,
+    isCompleteRow: [
+      for (int i = 0; i < row.cells.length; i++)
+        cellOffsets[i] + consumedByCell[i] >= row.cells[i].textLength,
+    ].every((isComplete) => isComplete),
+  );
+}
+
+List<double> _computeTableColumnWidths({
+  required TableBlock block,
+  required double tableWidth,
+  required LayoutConfig config,
+}) {
+  final columnCount = math.max(1, block.columnCount);
+  if (columnCount == 1) {
+    return [tableWidth];
+  }
+
+  final minimumColumnWidth =
+      math.min(_tableMinimumColumnWidth, tableWidth / columnCount);
+  if (tableWidth <= minimumColumnWidth * columnCount + 0.01) {
+    return _distributeEvenly(tableWidth, columnCount);
+  }
+
+  final desiredWidths = List<double>.filled(columnCount, minimumColumnWidth);
+  for (final row in block.rows) {
+    for (int columnIndex = 0; columnIndex < row.cells.length; columnIndex++) {
+      final cell = row.cells[columnIndex];
+      if (cell.spans.isEmpty) continue;
+
+      final baseStyle = cell.isHeader
+          ? config.baseTextStyle.copyWith(fontWeight: FontWeight.bold)
+          : config.baseTextStyle;
+      final intrinsicWidth = measureRichParagraphMaxIntrinsicWidth(
+        spans: cell.spans,
+        baseStyle: baseStyle,
+        textDirection: config.textDirection,
+      );
+      desiredWidths[columnIndex] = math.max(
+        desiredWidths[columnIndex],
+        intrinsicWidth + _tableCellPadding * 2,
+      );
+    }
+  }
+
+  return _fitDesiredWidthsToTable(
+    desiredWidths: desiredWidths,
+    totalWidth: tableWidth,
+    minimumWidth: minimumColumnWidth,
+  );
+}
+
+List<double> _fitDesiredWidthsToTable({
+  required List<double> desiredWidths,
+  required double totalWidth,
+  required double minimumWidth,
+}) {
+  final columnCount = desiredWidths.length;
+  final desiredSum = desiredWidths.fold<double>(0, (sum, width) => sum + width);
+  if (desiredSum <= 0) {
+    return _distributeEvenly(totalWidth, columnCount);
+  }
+
+  if (desiredSum <= totalWidth) {
+    final extra = totalWidth - desiredSum;
+    final widths = [
+      for (final width in desiredWidths)
+        width + extra * (width / desiredSum),
+    ];
+    return _normalizeWidthSum(widths, totalWidth);
+  }
+
+  if (minimumWidth * columnCount >= totalWidth - 0.01) {
+    return _distributeEvenly(totalWidth, columnCount);
+  }
+
+  final widths = List<double>.filled(columnCount, 0);
+  final pending = <int>{for (int i = 0; i < columnCount; i++) i};
+  var remainingWidth = totalWidth;
+  var remainingDesired =
+      desiredWidths.fold<double>(0, (sum, width) => sum + width);
+
+  while (pending.isNotEmpty) {
+    var assignedMinimum = false;
+    final pendingSnapshot = pending.toList();
+    for (final index in pendingSnapshot) {
+      final scaledWidth = remainingWidth * (desiredWidths[index] / remainingDesired);
+      if (scaledWidth <= minimumWidth) {
+        widths[index] = minimumWidth;
+        remainingWidth -= minimumWidth;
+        remainingDesired -= desiredWidths[index];
+        pending.remove(index);
+        assignedMinimum = true;
+      }
+    }
+
+    if (!assignedMinimum) {
+      for (final index in pending) {
+        widths[index] = remainingWidth * (desiredWidths[index] / remainingDesired);
+      }
+      break;
+    }
+
+    if (remainingWidth <= 0 || remainingDesired <= 0) {
+      final evenWidth =
+          pending.isEmpty ? 0.0 : math.max(1.0, remainingWidth / pending.length);
+      for (final index in pending) {
+        widths[index] = evenWidth;
+      }
+      break;
+    }
+  }
+
+  return _normalizeWidthSum(widths, totalWidth);
+}
+
+List<double> _distributeEvenly(double totalWidth, int columnCount) {
+  final width = totalWidth / columnCount;
+  return List<double>.filled(columnCount, width);
+}
+
+List<double> _normalizeWidthSum(List<double> widths, double totalWidth) {
+  if (widths.isEmpty) return widths;
+  final diff = totalWidth - widths.fold<double>(0, (sum, width) => sum + width);
+  widths[widths.length - 1] += diff;
+  return widths;
+}
+
+double _tableParagraphWidthForColumn(List<double> columnWidths, int columnIndex) {
+  return math.max(1.0, columnWidths[columnIndex] - _tableCellPadding * 2);
+}
+
+_MeasuredCellLine? _measureNextCellLine({
+  required List<AttributedSpan> spans,
+  required int textOffset,
+  required TextStyle baseStyle,
+  required double maxWidth,
+  required LineBreaker lineBreaker,
+}) {
+  final line = lineBreaker.layoutNextLine(
+    spans: spans,
+    textOffset: textOffset,
+    maxWidth: maxWidth,
+    baseStyle: baseStyle,
+    cursorBase: const DocumentCursor.zero().advanceBy(textOffset),
+  );
+  if (line == null) return null;
+
+  final charsConsumed = line.end.textOffset - line.start.textOffset;
+  final measured = _MeasuredCellLine(
+    charsConsumed: charsConsumed,
+    height: line.height,
+  );
+  line.paragraph.dispose();
+  return measured;
+}
+
+List<AttributedSpan> _sliceAttributedSpans(
+  List<AttributedSpan> spans,
+  int startOffset,
+  int maxChars,
+) {
+  final result = <AttributedSpan>[];
+  var currentOffset = 0;
+  var charsRemaining = maxChars;
+
+  for (final span in spans) {
+    if (charsRemaining <= 0) break;
+
+    final spanEnd = currentOffset + span.length;
+    if (spanEnd <= startOffset) {
+      currentOffset = spanEnd;
+      continue;
+    }
+
+    final sliceStart =
+        startOffset > currentOffset ? startOffset - currentOffset : 0;
+    final available = span.length - sliceStart;
+    final take = math.min(available, charsRemaining);
+    if (take > 0) {
+      result.add(span.substring(sliceStart, sliceStart + take));
+      charsRemaining -= take;
+    }
+
+    currentOffset = spanEnd;
+  }
+
+  return result;
 }
 
 _BandLayout _layoutTextBand({

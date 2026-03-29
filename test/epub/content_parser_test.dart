@@ -388,7 +388,7 @@ void main() {
       expect(block.spans[0].style.italic, isTrue);
     });
 
-    test('table elements are flattened into readable row paragraphs', () {
+    test('table elements become TableBlock rows and cells', () {
       final result = parseContentDocument(
         '<html><body>'
         '<p>Before</p>'
@@ -400,14 +400,19 @@ void main() {
         '</body></html>',
       );
 
-      expect(result.chapter.blocks, hasLength(4));
+      expect(result.chapter.blocks, hasLength(3));
       expect((result.chapter.blocks[0] as ParagraphBlock).plainText, 'Before');
-      expect((result.chapter.blocks[1] as ParagraphBlock).plainText, 'Left | Right');
-      expect((result.chapter.blocks[2] as ParagraphBlock).plainText, 'Bottom | Row');
-      expect((result.chapter.blocks[3] as ParagraphBlock).plainText, 'After');
+      final table = result.chapter.blocks[1] as TableBlock;
+      expect(table.rows, hasLength(2));
+      expect(table.rows[0].cells, hasLength(2));
+      expect(table.rows[0].cells[0].plainText, 'Left');
+      expect(table.rows[0].cells[1].plainText, 'Right');
+      expect(table.rows[1].cells[0].plainText, 'Bottom');
+      expect(table.rows[1].cells[1].plainText, 'Row');
+      expect((result.chapter.blocks[2] as ParagraphBlock).plainText, 'After');
     });
 
-    test('table captions and header cells are preserved when flattened', () {
+    test('table captions and header cells are preserved structurally', () {
       final result = parseContentDocument(
         '<html><body>'
         '<table>'
@@ -418,15 +423,16 @@ void main() {
         '</body></html>',
       );
 
-      expect(result.chapter.blocks, hasLength(3));
-      expect((result.chapter.blocks[0] as ParagraphBlock).plainText, 'Statistics');
-
-      final headerRow = result.chapter.blocks[1] as ParagraphBlock;
-      expect(headerRow.plainText, 'Label | Value');
-      expect(headerRow.spans.first.style.bold, isTrue);
-
-      final bodyRow = result.chapter.blocks[2] as ParagraphBlock;
-      expect(bodyRow.plainText, 'Alpha / Beta | 42');
+      expect(result.chapter.blocks, hasLength(1));
+      final table = result.chapter.blocks[0] as TableBlock;
+      expect(table.captionText, 'Statistics');
+      expect(table.rows, hasLength(2));
+      expect(table.rows[0].cells[0].isHeader, isTrue);
+      expect(table.rows[0].cells[0].plainText, 'Label');
+      expect(table.rows[0].cells[0].spans.first.style.bold, isTrue);
+      expect(table.rows[0].cells[1].plainText, 'Value');
+      expect(table.rows[1].cells[0].plainText, 'Alpha / Beta');
+      expect(table.rows[1].cells[1].plainText, '42');
     });
 
     test('<img> without src produces no block', () {

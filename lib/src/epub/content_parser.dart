@@ -486,17 +486,17 @@ void _processFigure(
 // Table processing
 // ---------------------------------------------------------------------------
 
-/// Flatten a table into readable paragraphs so EPUB table content is not lost.
+/// Parse a table into a structured [TableBlock].
 ///
-/// Captions become their own paragraph block. Each row becomes a paragraph with
-/// cells separated by ` | `. Nested block content inside a cell is flattened in
-/// reading order, using ` / ` between block fragments within the same cell.
+/// Nested block content inside a cell is flattened in reading order, using
+/// ` / ` between block fragments within the same cell.
 void _processTable(
   html_dom.Element table,
   _ParseContext context,
   SpanStyle inheritedStyle,
 ) {
   html_dom.Element? caption;
+  List<AttributedSpan>? captionSpans;
   final rows = <html_dom.Element>[];
 
   for (final child in table.children) {
@@ -517,22 +517,28 @@ void _processTable(
     _recordAnchor(caption, context);
     final captionStyle =
         _resolveStyle(caption, 'caption', context, inheritedStyle);
-    final captionSpans = _normalizeSpans(
+    final parsedCaption = _normalizeSpans(
       _collectTableCellSpans(caption, context, captionStyle),
     );
-    if (captionSpans.isNotEmpty) {
-      context.blocks.add(ParagraphBlock(captionSpans));
+    if (parsedCaption.isNotEmpty) {
+      captionSpans = parsedCaption;
     }
   }
 
+  final tableRows = <TableRowData>[];
   for (final row in rows) {
     _recordAnchor(row, context);
-    final rowSpans = _normalizeSpans(
-      _flattenTableRow(row, context, inheritedStyle),
-    );
-    if (rowSpans.isNotEmpty) {
-      context.blocks.add(ParagraphBlock(rowSpans));
+    final parsedRow = _parseTableRow(row, context, inheritedStyle);
+    if (parsedRow.cells.isNotEmpty) {
+      tableRows.add(parsedRow);
     }
+  }
+
+  if (captionSpans != null || tableRows.isNotEmpty) {
+    context.blocks.add(TableBlock(
+      caption: captionSpans,
+      rows: tableRows,
+    ));
   }
 }
 
@@ -550,13 +556,12 @@ Iterable<html_dom.Element> _collectTableRows(html_dom.Element parent) sync* {
   }
 }
 
-List<AttributedSpan> _flattenTableRow(
+TableRowData _parseTableRow(
   html_dom.Element row,
   _ParseContext context,
   SpanStyle inheritedStyle,
 ) {
-  final spans = <AttributedSpan>[];
-  var wroteCell = false;
+  final cells = <TableCellData>[];
 
   for (final cell in row.children) {
     final tag = cell.localName?.toLowerCase();
@@ -573,14 +578,13 @@ List<AttributedSpan> _flattenTableRow(
     );
     if (cellSpans.isEmpty) continue;
 
-    if (wroteCell) {
-      spans.add(AttributedSpan(' | ', style: inheritedStyle));
-    }
-    spans.addAll(cellSpans);
-    wroteCell = true;
+    cells.add(TableCellData(
+      spans: cellSpans,
+      isHeader: tag == 'th',
+    ));
   }
 
-  return spans;
+  return TableRowData(cells);
 }
 
 List<AttributedSpan> _collectTableCellSpans(

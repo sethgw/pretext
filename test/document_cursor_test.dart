@@ -90,6 +90,22 @@ void main() {
       expect(deserialized, cursor);
     });
 
+    test('serialize and deserialize preserve blockData', () {
+      const cursor = DocumentCursor(
+        chapterIndex: 0,
+        blockIndex: 2,
+        textOffset: 19,
+        blockData: 'table:1:4,7',
+      );
+
+      final serialized = cursor.serialize();
+      expect(serialized, '0:2:19|table:1:4,7');
+
+      final deserialized = DocumentCursor.deserialize(serialized);
+      expect(deserialized, cursor);
+      expect(deserialized.blockData, 'table:1:4,7');
+    });
+
     test('compareTo orders correctly', () {
       const a = DocumentCursor(chapterIndex: 0, blockIndex: 0, textOffset: 5);
       const b = DocumentCursor(chapterIndex: 0, blockIndex: 0, textOffset: 10);

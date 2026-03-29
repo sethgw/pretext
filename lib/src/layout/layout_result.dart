@@ -151,6 +151,57 @@ class LayoutDropCap {
   });
 }
 
+/// A positioned table cell within a laid-out table.
+class LayoutTableCell {
+  final Rect rect;
+  final ui.Paragraph? paragraph;
+  final bool isHeader;
+
+  const LayoutTableCell({
+    required this.rect,
+    this.paragraph,
+    this.isHeader = false,
+  });
+
+  LayoutTableCell copyWith({
+    Rect? rect,
+  }) {
+    return LayoutTableCell(
+      rect: rect ?? this.rect,
+      paragraph: paragraph,
+      isHeader: isHeader,
+    );
+  }
+}
+
+/// A positioned table with optional caption and a grid of cells.
+class LayoutTable {
+  final Rect rect;
+  final Rect? captionRect;
+  final ui.Paragraph? captionParagraph;
+  final List<LayoutTableCell> cells;
+
+  const LayoutTable({
+    required this.rect,
+    this.captionRect,
+    this.captionParagraph,
+    this.cells = const [],
+  });
+
+  LayoutTable copyWith({
+    Rect? rect,
+    Rect? captionRect,
+    List<LayoutTableCell>? cells,
+  }) {
+    return LayoutTable(
+      rect: rect ?? this.rect,
+      captionRect: captionRect ?? this.captionRect,
+      captionParagraph: captionParagraph,
+      cells: cells ?? this.cells,
+    );
+  }
+}
+
 /// A complete laid-out page — the output of the layout engine.
 ///
 /// Contains all positioned lines and images, plus the cursor range
@@ -168,6 +219,9 @@ class LayoutPage {
   /// All drop cap letters on this page.
   final List<LayoutDropCap> dropCaps;
 
+  /// All positioned tables on this page.
+  final List<LayoutTable> tables;
+
   /// Cursor at the start of this page's content.
   final DocumentCursor startCursor;
 
@@ -182,6 +236,7 @@ class LayoutPage {
     this.images = const [],
     this.rules = const [],
     this.dropCaps = const [],
+    this.tables = const [],
     required this.startCursor,
     required this.endCursor,
     required this.size,
@@ -192,7 +247,8 @@ class LayoutPage {
       lines.isEmpty &&
       images.isEmpty &&
       rules.isEmpty &&
-      dropCaps.isEmpty;
+      dropCaps.isEmpty &&
+      tables.isEmpty;
 
   /// Dispose all native paragraph resources owned by this page.
   void dispose() {
@@ -205,6 +261,18 @@ class LayoutPage {
     for (final dropCap in dropCaps) {
       if (paragraphs.add(dropCap.paragraph)) {
         dropCap.paragraph.dispose();
+      }
+    }
+    for (final table in tables) {
+      final captionParagraph = table.captionParagraph;
+      if (captionParagraph != null && paragraphs.add(captionParagraph)) {
+        captionParagraph.dispose();
+      }
+      for (final cell in table.cells) {
+        final paragraph = cell.paragraph;
+        if (paragraph != null && paragraphs.add(paragraph)) {
+          paragraph.dispose();
+        }
       }
     }
   }

@@ -90,3 +90,51 @@ class HorizontalRuleBlock extends Block {
   @override
   int get textLength => 0;
 }
+
+/// A single table cell with rich text content.
+class TableCellData {
+  final List<AttributedSpan> spans;
+  final bool isHeader;
+
+  const TableCellData({
+    required this.spans,
+    this.isHeader = false,
+  });
+
+  int get textLength => spans.fold(0, (sum, span) => sum + span.length);
+
+  String get plainText => spans.map((span) => span.text).join();
+}
+
+/// A single table row.
+class TableRowData {
+  final List<TableCellData> cells;
+
+  const TableRowData(this.cells);
+
+  int get textLength =>
+      cells.fold(0, (sum, cell) => sum + cell.textLength);
+}
+
+/// A block-level table with optional caption and structured rows/cells.
+class TableBlock extends Block {
+  final List<AttributedSpan>? caption;
+  final List<TableRowData> rows;
+
+  const TableBlock({
+    this.caption,
+    required this.rows,
+  });
+
+  int get captionTextLength =>
+      caption == null ? 0 : caption!.fold<int>(0, (sum, span) => sum + span.length);
+
+  String? get captionText => caption?.map((span) => span.text).join();
+
+  int get columnCount =>
+      rows.fold(0, (maxColumns, row) => row.cells.length > maxColumns ? row.cells.length : maxColumns);
+
+  @override
+  int get textLength =>
+      captionTextLength + rows.fold(0, (sum, row) => sum + row.textLength);
+}
