@@ -40,6 +40,39 @@ class LayoutConfig {
   /// Left indent applied to blockquotes (in logical pixels).
   final double blockquoteIndent;
 
+  // --- Drop cap configuration ---
+
+  /// Whether to render a drop cap at the start of each chapter's first
+  /// paragraph.
+  final bool enableDropCaps;
+
+  /// How many body-text lines the drop cap letter spans (default: 3).
+  final int dropCapLines;
+
+  /// Multiplier on the base font size used to render the drop cap letter
+  /// (default: 3.5). The actual font size may be adjusted so the drop cap
+  /// exactly spans [dropCapLines] lines.
+  final double dropCapFontScale;
+
+  /// Optional override style for the drop cap letter. If null, the base
+  /// text style is used (scaled up).
+  final TextStyle? dropCapStyle;
+
+  /// Horizontal padding between the drop cap letter and the body text
+  /// (in logical pixels).
+  final double dropCapPadding;
+
+  // --- Adaptive headline configuration ---
+
+  /// Maximum number of lines a heading is allowed to occupy before the
+  /// engine shrinks the font to fit. Set to 0 to disable adaptive sizing.
+  final int headingMaxLines;
+
+  /// Minimum scale factor when shrinking a heading (default: 0.6).
+  /// The heading font size will never be reduced below
+  /// `originalSize * headingMinScale`.
+  final double headingMinScale;
+
   const LayoutConfig({
     required this.baseTextStyle,
     required this.lineHeight,
@@ -51,6 +84,13 @@ class LayoutConfig {
     this.minSlotWidth = 50.0,
     this.listIndent = 24.0,
     this.blockquoteIndent = 24.0,
+    this.enableDropCaps = false,
+    this.dropCapLines = 3,
+    this.dropCapFontScale = 3.5,
+    this.dropCapStyle,
+    this.dropCapPadding = 6.0,
+    this.headingMaxLines = 3,
+    this.headingMinScale = 0.6,
   });
 
   /// Resolve the text style for a heading at the given [level].
@@ -82,6 +122,13 @@ class LayoutConfig {
     double? minSlotWidth,
     double? listIndent,
     double? blockquoteIndent,
+    bool? enableDropCaps,
+    int? dropCapLines,
+    double? dropCapFontScale,
+    TextStyle? dropCapStyle,
+    double? dropCapPadding,
+    int? headingMaxLines,
+    double? headingMinScale,
   }) {
     return LayoutConfig(
       baseTextStyle: baseTextStyle ?? this.baseTextStyle,
@@ -94,6 +141,13 @@ class LayoutConfig {
       minSlotWidth: minSlotWidth ?? this.minSlotWidth,
       listIndent: listIndent ?? this.listIndent,
       blockquoteIndent: blockquoteIndent ?? this.blockquoteIndent,
+      enableDropCaps: enableDropCaps ?? this.enableDropCaps,
+      dropCapLines: dropCapLines ?? this.dropCapLines,
+      dropCapFontScale: dropCapFontScale ?? this.dropCapFontScale,
+      dropCapStyle: dropCapStyle ?? this.dropCapStyle,
+      dropCapPadding: dropCapPadding ?? this.dropCapPadding,
+      headingMaxLines: headingMaxLines ?? this.headingMaxLines,
+      headingMinScale: headingMinScale ?? this.headingMinScale,
     );
   }
 }

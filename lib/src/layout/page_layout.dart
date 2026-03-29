@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:flutter/painting.dart';
 
 import 'package:pretext/src/document/attributed_span.dart';
@@ -38,10 +41,20 @@ LayoutPage layoutPage({
   final lines = <LayoutLine>[];
   final images = <LayoutImage>[];
   final rules = <LayoutRule>[];
+  final dropCaps = <LayoutDropCap>[];
   double y = contentRect.top;
   var cursor = startCursor;
 
-  while (y + config.lineHeight <= contentRect.bottom) {
+  // Mutable list of obstacles — drop caps add temporary obstacles.
+  final activeObstacles = List<Obstacle>.of(obstacles);
+
+  // Adaptive heading: track the heading style override for the current
+  // block so it persists across all lines of the same heading.
+  TextStyle? headingStyleOverride;
+  int? headingOverrideBlockIndex;
+  int? headingOverrideChapterIndex;
+
+  while (y < contentRect.bottom) {
     if (cursor.isAtEnd(document)) break;
 
     final block = document.blockAt(cursor);
@@ -72,76 +85,132 @@ LayoutPage layoutPage({
 
     // --- HorizontalRuleBlock: draw a rule line ---
     if (block is HorizontalRuleBlock) {
+      final ruleHeight = math.max(8.0, config.blockSpacing);
+      if (y + ruleHeight > contentRect.bottom) break;
+
       rules.add(LayoutRule(
         x: contentRect.left,
-        y: y + config.lineHeight / 2,
+        y: y + ruleHeight / 2,
         width: contentRect.width,
       ));
-      y += config.lineHeight;
+      y += ruleHeight;
       cursor = cursor.nextBlock(document);
       continue;
     }
 
+    // --- Drop cap detection ---
+    // Drop caps apply when: enabled, first block, first character,
+    // and the block is a ParagraphBlock with text.
+    if (config.enableDropCaps &&
+        block is ParagraphBlock &&
+        cursor.blockIndex == 0 &&
+        cursor.textOffset == 0 &&
+        block.plainText.isNotEmpty) {
+      final dcResult = _buildDropCap(
+        block: block,
+        config: config,
+        contentRect: contentRect,
+        y: y,
+        lineBreaker: lineBreaker,
+      );
+      if (dcResult != null) {
+        dropCaps.add(dcResult.layoutDropCap);
+        activeObstacles.add(dcResult.obstacle);
+        // Advance cursor past the drop cap character(s).
+        cursor = cursor.advanceBy(dcResult.charCount);
+      }
+    }
+
+    // --- Adaptive headline sizing ---
+    // Compute the override once at the start of a heading block,
+    // then reuse it for all subsequent lines of the same block.
+    if (block is HeadingBlock &&
+        config.headingMaxLines > 0 &&
+        (headingOverrideBlockIndex != cursor.blockIndex ||
+            headingOverrideChapterIndex != cursor.chapterIndex)) {
+      headingStyleOverride = _adaptHeadingStyle(
+        spans: block.spans,
+        baseHeadingStyle: config.headingStyle(block.level),
+        maxWidth: contentRect.width,
+        config: config,
+        lineBreaker: lineBreaker,
+      );
+      headingOverrideBlockIndex = cursor.blockIndex;
+      headingOverrideChapterIndex = cursor.chapterIndex;
+    } else if (block is! HeadingBlock) {
+      // Clear the override when we move past the heading block.
+      if (headingStyleOverride != null) {
+        headingStyleOverride = null;
+        headingOverrideBlockIndex = null;
+        headingOverrideChapterIndex = null;
+      }
+    }
+
     // --- Resolve spans for the current cursor position ---
-    final resolved = _resolveBlockAtOffset(block, config, cursor.textOffset);
+    final resolved = _resolveBlockAtOffset(
+      block,
+      config,
+      cursor.textOffset,
+      headingStyleOverride: headingStyleOverride,
+    );
     if (resolved.spans == null) {
       cursor = cursor.nextBlock(document);
       continue;
     }
 
-    // --- Compute available horizontal slots ---
-    final bandTop = y;
-    final bandBottom = y + config.lineHeight;
-    final blocked = <Interval>[];
-    for (final obstacle in obstacles) {
-      final interval = obstacle.horizontalBlockAt(bandTop, bandBottom);
-      if (interval != null) {
-        blocked.add(interval);
+    final estimatedBandHeight = _estimatedBandHeight(
+      resolved.style,
+      config.lineHeight,
+    );
+
+    if (y + estimatedBandHeight > contentRect.bottom) break;
+
+    var bandLayout = _layoutTextBand(
+      block: block,
+      cursor: cursor,
+      y: y,
+      contentRect: contentRect,
+      config: config,
+      lineBreaker: lineBreaker,
+      obstacles: activeObstacles,
+      bandHeight: estimatedBandHeight,
+      headingStyleOverride: headingStyleOverride,
+    );
+
+    if (!bandLayout.producedContent) {
+      y += estimatedBandHeight;
+      continue;
+    }
+
+    final measuredBandHeight = math.max(
+      estimatedBandHeight,
+      bandLayout.bandHeight,
+    );
+
+    if ((measuredBandHeight - estimatedBandHeight).abs() > 0.5) {
+      if (y + measuredBandHeight > contentRect.bottom) break;
+
+      final rerun = _layoutTextBand(
+        block: block,
+        cursor: cursor,
+        y: y,
+        contentRect: contentRect,
+        config: config,
+        lineBreaker: lineBreaker,
+        obstacles: activeObstacles,
+        bandHeight: measuredBandHeight,
+        headingStyleOverride: headingStyleOverride,
+      );
+      if (rerun.producedContent) {
+        bandLayout = rerun;
       }
     }
 
-    final slots = carveSlots(
-      Interval(contentRect.left + resolved.leftIndent, contentRect.right),
-      blocked,
-      minWidth: config.minSlotWidth,
-    );
+    if (y + bandLayout.bandHeight > contentRect.bottom) break;
 
-    if (slots.isEmpty) {
-      y += config.lineHeight;
-      continue;
-    }
-
-    // --- Fill each available slot with text ---
-    bool anyLineProduced = false;
-    for (final slot in slots) {
-      if (cursor.isAtBlockEnd(document)) break;
-
-      // Re-resolve in case cursor advanced into a new sub-element.
-      final current =
-          _resolveBlockAtOffset(block, config, cursor.textOffset);
-      if (current.spans == null) break;
-
-      final line = lineBreaker.layoutNextLine(
-        spans: current.spans!,
-        textOffset: current.localOffset,
-        maxWidth: slot.width,
-        baseStyle: current.style,
-        cursorBase: cursor,
-      );
-
-      if (line == null) break;
-
-      lines.add(line.copyWith(x: slot.left, y: y));
-      cursor = line.end;
-      anyLineProduced = true;
-    }
-
-    if (!anyLineProduced) {
-      y += config.lineHeight;
-      continue;
-    }
-
-    y += config.lineHeight;
+    lines.addAll(bandLayout.lines);
+    cursor = cursor.advanceBy(bandLayout.consumedChars);
+    y += bandLayout.bandHeight;
 
     // If the current block is exhausted, advance to the next block.
     if (cursor.isAtBlockEnd(document)) {
@@ -154,6 +223,7 @@ LayoutPage layoutPage({
     lines: lines,
     images: images,
     rules: rules,
+    dropCaps: dropCaps,
     startCursor: startCursor,
     endCursor: cursor,
     size: pageSize,
@@ -203,14 +273,38 @@ class _ResolvedBlock {
   final List<AttributedSpan>? spans;
   final TextStyle style;
   final int localOffset;
+  final int segmentLength;
   final double leftIndent;
+  final String? markerText;
+  final double spacingAfterSegment;
+  final bool completesCurrentBlockWhenSegmentEnds;
 
   const _ResolvedBlock({
     required this.spans,
     required this.style,
     required this.localOffset,
+    required this.segmentLength,
     this.leftIndent = 0,
+    this.markerText,
+    this.spacingAfterSegment = 0,
+    this.completesCurrentBlockWhenSegmentEnds = true,
   });
+}
+
+class _BandLayout {
+  final List<LayoutLine> lines;
+  final int consumedChars;
+  final double bandHeight;
+  final double trailingSpacing;
+
+  const _BandLayout({
+    required this.lines,
+    required this.consumedChars,
+    required this.bandHeight,
+    this.trailingSpacing = 0,
+  });
+
+  bool get producedContent => lines.isNotEmpty;
 }
 
 /// Resolve the spans, style, and local offset for a position within [block].
@@ -218,11 +312,15 @@ class _ResolvedBlock {
 /// For compound blocks (ListBlock, BlockquoteBlock), this finds the right
 /// sub-element based on [textOffset] and returns the correct local offset
 /// for the line breaker.
+///
+/// If [headingStyleOverride] is provided it is used instead of the
+/// config-resolved heading style (used by adaptive headline sizing).
 _ResolvedBlock _resolveBlockAtOffset(
   Block block,
   LayoutConfig config,
-  int textOffset,
-) {
+  int textOffset, {
+  TextStyle? headingStyleOverride,
+}) {
   return switch (block) {
     ParagraphBlock(:final spans) => _ResolvedBlock(
         spans: spans,
@@ -231,7 +329,7 @@ _ResolvedBlock _resolveBlockAtOffset(
       ),
     HeadingBlock(:final level, :final spans) => _ResolvedBlock(
         spans: spans,
-        style: config.headingStyle(level),
+        style: headingStyleOverride ?? config.headingStyle(level),
         localOffset: textOffset,
       ),
     ListBlock() => _resolveListItem(block, config, textOffset),
@@ -255,11 +353,13 @@ _ResolvedBlock _resolveListItem(
     final itemLen =
         block.items[i].fold(0, (sum, span) => sum + span.length);
     if (textOffset < consumed + itemLen) {
+      final markerText = block.ordered ? '${i + 1}.' : '\u2022';
       return _ResolvedBlock(
         spans: block.items[i],
         style: config.baseTextStyle,
         localOffset: textOffset - consumed,
         leftIndent: config.listIndent,
+        markerText: markerText,
       );
     }
     consumed += itemLen;
@@ -298,4 +398,355 @@ _ResolvedBlock _resolveBlockquoteChild(
     style: config.baseTextStyle,
     localOffset: 0,
   );
+}
+
+double _estimatedBandHeight(TextStyle style, double fallbackLineHeight) {
+  final fontSize = style.fontSize ?? fallbackLineHeight;
+  final lineHeight = style.height ?? 1.0;
+  final estimated = fontSize * lineHeight;
+  return math.max(fallbackLineHeight, estimated);
+}
+
+_BandLayout _layoutTextBand({
+  required Block block,
+  required DocumentCursor cursor,
+  required double y,
+  required Rect contentRect,
+  required LayoutConfig config,
+  required LineBreaker lineBreaker,
+  required List<Obstacle> obstacles,
+  required double bandHeight,
+  required TextStyle? headingStyleOverride,
+}) {
+  final resolved = _resolveBlockAtOffset(
+    block,
+    config,
+    cursor.textOffset,
+    headingStyleOverride: headingStyleOverride,
+  );
+  if (resolved.spans == null) {
+    return _BandLayout(lines: const [], consumedChars: 0, bandHeight: bandHeight);
+  }
+
+  final blocked = <Interval>[];
+  final bandTop = y;
+  final bandBottom = y + bandHeight;
+  for (final obstacle in obstacles) {
+    final interval = obstacle.horizontalBlockAt(bandTop, bandBottom);
+    if (interval != null) {
+      blocked.add(interval);
+    }
+  }
+
+  final slots = carveSlots(
+    Interval(contentRect.left + resolved.leftIndent, contentRect.right),
+    blocked,
+    minWidth: config.minSlotWidth,
+  );
+  if (slots.isEmpty) {
+    return _BandLayout(lines: const [], consumedChars: 0, bandHeight: bandHeight);
+  }
+
+  final lines = <LayoutLine>[];
+  var currentCursor = cursor;
+  var maxHeight = 0.0;
+  var markerAdded = false;
+
+  for (final slot in slots) {
+    if (currentCursor.textOffset >= block.textLength) break;
+
+    final current = _resolveBlockAtOffset(
+      block,
+      config,
+      currentCursor.textOffset,
+      headingStyleOverride: headingStyleOverride,
+    );
+    if (current.spans == null) break;
+
+    final line = lineBreaker.layoutNextLine(
+      spans: current.spans!,
+      textOffset: current.localOffset,
+      maxWidth: slot.width,
+      baseStyle: current.style,
+      cursorBase: currentCursor,
+    );
+    if (line == null) break;
+
+    final positionedLine = line.copyWith(x: slot.left, y: y);
+    lines.add(positionedLine);
+    maxHeight = math.max(maxHeight, positionedLine.height);
+
+    if (!markerAdded &&
+        current.markerText != null &&
+        current.localOffset == 0) {
+      final markerLine = _buildMarkerLine(
+        markerText: current.markerText!,
+        style: current.style,
+        textStartX: contentRect.left + current.leftIndent,
+        y: y,
+        cursor: currentCursor,
+        textDirection: config.textDirection,
+      );
+      lines.add(markerLine);
+      maxHeight = math.max(maxHeight, markerLine.height);
+      markerAdded = true;
+    }
+
+    currentCursor = line.end;
+    if (line.hardBreak) break;
+  }
+
+  return _BandLayout(
+    lines: lines,
+    consumedChars: currentCursor.textOffset - cursor.textOffset,
+    bandHeight: maxHeight == 0 ? bandHeight : maxHeight,
+  );
+}
+
+LayoutLine _buildMarkerLine({
+  required String markerText,
+  required TextStyle style,
+  required double textStartX,
+  required double y,
+  required DocumentCursor cursor,
+  required TextDirection textDirection,
+}) {
+  final builder = ui.ParagraphBuilder(
+    ui.ParagraphStyle(
+      textDirection: textDirection,
+      fontSize: style.fontSize,
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      height: style.height,
+    ),
+  );
+  builder.pushStyle(ui.TextStyle(
+    color: style.color,
+    fontSize: style.fontSize,
+    fontWeight: style.fontWeight,
+    fontStyle: style.fontStyle,
+    fontFamily: style.fontFamily,
+    height: style.height,
+  ));
+  builder.addText(markerText);
+  builder.pop();
+
+  final paragraph = builder.build();
+  paragraph.layout(const ui.ParagraphConstraints(width: 200));
+  final metrics = paragraph.getLineMetricsAt(0);
+
+  final width = metrics?.width ?? paragraph.maxIntrinsicWidth;
+  final height = metrics?.height ?? paragraph.height;
+  final ascent = metrics?.ascent ?? height;
+  final baseline = metrics?.baseline ?? ascent;
+  final x = math.max(0.0, textStartX - width - 6.0);
+
+  return LayoutLine(
+    paragraph: paragraph,
+    x: x,
+    y: y,
+    width: width,
+    height: height,
+    ascent: ascent,
+    baseline: baseline,
+    start: cursor,
+    end: cursor,
+    hardBreak: false,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Drop cap support
+// ---------------------------------------------------------------------------
+
+/// Result of building a drop cap: the visual element, the obstacle that
+/// body text flows around, and the number of characters consumed.
+class _DropCapResult {
+  final LayoutDropCap layoutDropCap;
+  final RectangleObstacle obstacle;
+  final int charCount;
+
+  const _DropCapResult({
+    required this.layoutDropCap,
+    required this.obstacle,
+    required this.charCount,
+  });
+}
+
+/// Build a drop cap for the first character(s) of a paragraph.
+///
+/// Returns `null` if the paragraph has no text or the drop cap cannot
+/// be measured (e.g., the paragraph consists only of whitespace).
+_DropCapResult? _buildDropCap({
+  required ParagraphBlock block,
+  required LayoutConfig config,
+  required Rect contentRect,
+  required double y,
+  required LineBreaker lineBreaker,
+}) {
+  final plainText = block.plainText;
+  if (plainText.isEmpty) return null;
+
+  // Extract the first character.
+  const charCount = 1;
+  final dropCapChar = plainText.substring(0, charCount);
+
+  // Compute the target height: dropCapLines * lineHeight.
+  final targetHeight = config.dropCapLines * config.lineHeight;
+
+  // Determine the style for the drop cap letter.
+  final baseStyle = config.dropCapStyle ?? config.baseTextStyle;
+  final baseFontSize = baseStyle.fontSize ?? 16.0;
+
+  // Start with the configured scale and adjust to fill targetHeight.
+  // We do a quick measurement loop to get the font size right.
+  var fontSize = baseFontSize * config.dropCapFontScale;
+  late ui.Paragraph dropCapParagraph;
+  late double dropCapWidth;
+  late double dropCapHeight;
+
+  // Binary-search-like approach: measure, adjust if needed.
+  for (int attempt = 0; attempt < 5; attempt++) {
+    final style = baseStyle.copyWith(fontSize: fontSize);
+    final builder = ui.ParagraphBuilder(
+      ui.ParagraphStyle(
+        textDirection: config.textDirection,
+        fontSize: style.fontSize,
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
+        fontStyle: style.fontStyle,
+        height: style.height,
+      ),
+    );
+    builder.pushStyle(ui.TextStyle(
+      color: style.color,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      fontFamily: style.fontFamily,
+      height: style.height,
+    ));
+    builder.addText(dropCapChar);
+    builder.pop();
+
+    final p = builder.build();
+    p.layout(const ui.ParagraphConstraints(width: double.infinity));
+    dropCapWidth = p.maxIntrinsicWidth;
+    dropCapHeight = p.height;
+
+    if ((dropCapHeight - targetHeight).abs() < 2.0 || attempt == 4) {
+      dropCapParagraph = p;
+      break;
+    }
+
+    // Scale fontSize proportionally to reach targetHeight.
+    final ratio = targetHeight / dropCapHeight;
+    fontSize *= ratio;
+    p.dispose();
+  }
+
+  // Position at the left edge of the content area, at the current y.
+  final dcX = contentRect.left;
+  final dcY = y;
+
+  // Build the obstacle that text flows around.
+  // The obstacle covers the drop cap width + padding, for the height
+  // of dropCapLines * lineHeight.
+  final obstacle = RectangleObstacle(
+    x: dcX,
+    y: dcY,
+    width: dropCapWidth,
+    height: targetHeight,
+    padding: config.dropCapPadding,
+  );
+
+  return _DropCapResult(
+    layoutDropCap: LayoutDropCap(
+      paragraph: dropCapParagraph,
+      x: dcX,
+      y: dcY,
+    ),
+    obstacle: obstacle,
+    charCount: charCount,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive headline sizing
+// ---------------------------------------------------------------------------
+
+/// Measure how many lines [spans] would occupy at the given [style] and
+/// [maxWidth], using the [lineBreaker] for accurate measurement.
+int _countLines({
+  required List<AttributedSpan> spans,
+  required TextStyle style,
+  required double maxWidth,
+  required LineBreaker lineBreaker,
+}) {
+  int lineCount = 0;
+  int offset = 0;
+  final totalLen = spans.fold(0, (sum, s) => sum + s.length);
+  const dummyCursor = DocumentCursor.zero();
+
+  while (offset < totalLen) {
+    final line = lineBreaker.layoutNextLine(
+      spans: spans,
+      textOffset: offset,
+      maxWidth: maxWidth,
+      baseStyle: style,
+      cursorBase: dummyCursor.advanceBy(offset),
+    );
+    if (line == null) break;
+    final charsConsumed = line.end.textOffset - line.start.textOffset;
+    if (charsConsumed <= 0) break;
+    offset += charsConsumed;
+    lineCount++;
+    // Dispose the measurement paragraph — we don't need it.
+    line.paragraph.dispose();
+  }
+
+  return lineCount;
+}
+
+/// Compute a potentially-scaled-down [TextStyle] for a heading so it
+/// fits within [config.headingMaxLines] at the given [maxWidth].
+///
+/// Returns the original style unmodified if it already fits.
+TextStyle _adaptHeadingStyle({
+  required List<AttributedSpan> spans,
+  required TextStyle baseHeadingStyle,
+  required double maxWidth,
+  required LayoutConfig config,
+  required LineBreaker lineBreaker,
+}) {
+  if (config.headingMaxLines <= 0) return baseHeadingStyle;
+
+  final originalFontSize = baseHeadingStyle.fontSize ?? 16.0;
+  final minFontSize = originalFontSize * config.headingMinScale;
+  var currentStyle = baseHeadingStyle;
+  var currentFontSize = originalFontSize;
+
+  while (currentFontSize > minFontSize) {
+    final lineCount = _countLines(
+      spans: spans,
+      style: currentStyle,
+      maxWidth: maxWidth,
+      lineBreaker: lineBreaker,
+    );
+
+    if (lineCount <= config.headingMaxLines) {
+      return currentStyle;
+    }
+
+    // Shrink by 10%.
+    currentFontSize *= 0.9;
+    if (currentFontSize < minFontSize) {
+      currentFontSize = minFontSize;
+    }
+    currentStyle = baseHeadingStyle.copyWith(fontSize: currentFontSize);
+  }
+
+  // Final check at minimum size.
+  return currentStyle;
 }

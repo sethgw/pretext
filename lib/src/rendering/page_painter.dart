@@ -80,6 +80,11 @@ class PagePainter extends CustomPainter {
     for (final line in page.lines) {
       canvas.drawParagraph(line.paragraph, Offset(line.x, line.y));
     }
+
+    // Paint drop cap letters
+    for (final dropCap in page.dropCaps) {
+      canvas.drawParagraph(dropCap.paragraph, Offset(dropCap.x, dropCap.y));
+    }
   }
 
   void _paintObstacles(Canvas canvas, Size size) {

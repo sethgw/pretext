@@ -7,11 +7,16 @@ import 'package:pretext/src/layout/layout_result.dart';
 import 'package:pretext/src/layout/page_layout.dart';
 import 'package:pretext/src/obstacles/obstacle.dart';
 import 'package:pretext/src/rendering/page_painter.dart';
+import 'package:pretext/src/widgets/progress_store.dart';
 
 /// A paginated reader widget backed by [PageView].
 ///
 /// Lazily lays out pages on demand and caches them. Supports
 /// obstacle builders per page, progress callbacks, and cursor tracking.
+///
+/// When [progressStore] and [bookId] are provided, the reader will
+/// automatically restore the saved reading position on startup and
+/// persist the current position on every page change.
 ///
 /// This is the main consumer-facing widget for ebook reading.
 class PagedReader extends StatefulWidget {
@@ -25,6 +30,12 @@ class PagedReader extends StatefulWidget {
   final Color? backgroundColor;
   final bool debugObstacles;
 
+  /// Optional store for persisting reading progress across sessions.
+  final ProgressStore? progressStore;
+
+  /// Book identifier used as the key for [progressStore].
+  final String? bookId;
+
   const PagedReader({
     super.key,
     required this.document,
@@ -36,6 +47,8 @@ class PagedReader extends StatefulWidget {
     this.obstacleBuilder,
     this.backgroundColor,
     this.debugObstacles = false,
+    this.progressStore,
+    this.bookId,
   });
 
   @override
@@ -54,6 +67,28 @@ class PagedReaderState extends State<PagedReader> {
   void initState() {
     super.initState();
     _pageController = PageController();
+    _restoreProgress();
+  }
+
+  /// Restore saved reading position from [ProgressStore], if available.
+  Future<void> _restoreProgress() async {
+    final store = widget.progressStore;
+    final bookId = widget.bookId;
+    if (store == null || bookId == null) return;
+
+    final cursor = await store.load(bookId);
+    if (cursor != null && mounted) {
+      goToCursor(cursor);
+    }
+  }
+
+  /// Persist the current reading position to [ProgressStore], if available.
+  void _saveProgress(DocumentCursor cursor) {
+    final store = widget.progressStore;
+    final bookId = widget.bookId;
+    if (store == null || bookId == null) return;
+
+    store.save(bookId, cursor);
   }
 
   @override
@@ -182,6 +217,7 @@ class PagedReaderState extends State<PagedReader> {
               widget.onCursorChanged?.call(page.startCursor);
               widget.onProgressChanged
                   ?.call(page.endCursor.progressIn(widget.document));
+              _saveProgress(page.startCursor);
             }
             widget.onPageChanged?.call(index);
           },

@@ -87,6 +87,16 @@ class LayoutImage {
     required this.rect,
     this.alt,
   });
+
+  LayoutImage copyWith({
+    Rect? rect,
+  }) {
+    return LayoutImage(
+      src: src,
+      rect: rect ?? this.rect,
+      alt: alt,
+    );
+  }
 }
 
 /// A horizontal rule positioned on a page.
@@ -94,8 +104,50 @@ class LayoutRule {
   final double x;
   final double y;
   final double width;
+  final double thickness;
 
-  const LayoutRule({required this.x, required this.y, required this.width});
+  const LayoutRule({
+    required this.x,
+    required this.y,
+    required this.width,
+    this.thickness = 1.0,
+  });
+
+  Rect get rect => Rect.fromLTWH(x, y, width, thickness);
+
+  LayoutRule copyWith({
+    double? x,
+    double? y,
+  }) {
+    return LayoutRule(
+      x: x ?? this.x,
+      y: y ?? this.y,
+      width: width,
+      thickness: thickness,
+    );
+  }
+}
+
+/// A drop cap letter positioned on a page.
+///
+/// The drop cap is rendered as a separate [ui.Paragraph] that sits at the
+/// top-left of the content area, spanning several body-text lines. The
+/// surrounding body text flows around it via the obstacle system.
+class LayoutDropCap {
+  /// The pre-built paragraph containing the drop cap letter.
+  final ui.Paragraph paragraph;
+
+  /// X position in page-local coordinates.
+  final double x;
+
+  /// Y position in page-local coordinates.
+  final double y;
+
+  const LayoutDropCap({
+    required this.paragraph,
+    required this.x,
+    required this.y,
+  });
 }
 
 /// A complete laid-out page — the output of the layout engine.
@@ -112,6 +164,9 @@ class LayoutPage {
   /// All horizontal rules on this page.
   final List<LayoutRule> rules;
 
+  /// All drop cap letters on this page.
+  final List<LayoutDropCap> dropCaps;
+
   /// Cursor at the start of this page's content.
   final DocumentCursor startCursor;
 
@@ -125,11 +180,16 @@ class LayoutPage {
     required this.lines,
     this.images = const [],
     this.rules = const [],
+    this.dropCaps = const [],
     required this.startCursor,
     required this.endCursor,
     required this.size,
   });
 
   /// Whether this page has any visible content.
-  bool get isEmpty => lines.isEmpty && images.isEmpty;
+  bool get isEmpty =>
+      lines.isEmpty &&
+      images.isEmpty &&
+      rules.isEmpty &&
+      dropCaps.isEmpty;
 }
