@@ -2,23 +2,55 @@
 
 `pretext` is a native Flutter text layout engine for paginated reading surfaces.
 
-It provides:
+It is built for reader-style interfaces where text cannot just live in a single scrolling column. The package gives you native pagination, obstacle-aware flow, EPUB parsing, and a swipe-based reader surface without WebView.
 
-- obstacle-aware text flow
-- swipe-based pagination
-- multi-column layout
-- EPUB loading and parsing
-- a turnkey `EpubReader` widget
-- TOC navigation and saved reading progress
+## Highlights
+
+- obstacle-aware text flow around rectangles, circles, and polygons
+- swipe-based pagination with lazy page layout
+- multi-column layout with cursor handoff
+- EPUB loading, TOC parsing, image extraction, and href target resolution
+- a turnkey `EpubReader` widget on top of `PagedReader`
+- saved reading progress hooks and built-in reader themes
+- link hit testing for internal EPUB jumps and external-link callbacks
 
 ## Install
 
+The package is currently hosted from GitHub.
+
 ```yaml
 dependencies:
-  pretext: ^0.4.0
+  pretext:
+    git:
+      url: git@github.com:sethgw/pretext.git
+      ref: v0.4.0
+```
+
+If you prefer HTTPS:
+
+```yaml
+dependencies:
+  pretext:
+    git:
+      url: https://github.com/sethgw/pretext.git
+      ref: v0.4.0
 ```
 
 ## Quick Start
+
+Load an EPUB from bytes:
+
+```dart
+import 'dart:typed_data';
+
+import 'package:pretext/pretext.dart';
+
+EpubLoadResult openBook(Uint8List bytes) {
+  return loadEpub(bytes);
+}
+```
+
+Render it in a swipeable reader:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -37,21 +69,12 @@ class ReaderScreen extends StatelessWidget {
     return EpubReader(
       book: book,
       theme: ReaderTheme.sepia,
-      bookId: 'my-book',
+      bookId: 'demo-book',
+      onExternalLinkTap: (href) {
+        debugPrint('Open externally: $href');
+      },
     );
   }
-}
-```
-
-To load an EPUB from bytes:
-
-```dart
-import 'dart:typed_data';
-
-import 'package:pretext/pretext.dart';
-
-EpubLoadResult openBook(Uint8List bytes) {
-  return loadEpub(bytes);
 }
 ```
 
@@ -59,14 +82,15 @@ If you want lower-level control, use `PagedReader`, `DocumentView`, `layoutPage`
 
 ## Core API
 
-- `loadEpub(bytes)` parses EPUB archives into `Document`, TOC entries, images, and href targets.
-- `EpubReader` gives you a swipeable reader UI with TOC jumps and progress persistence hooks.
-- `PagedReader` gives you paginated `PageView`-based reading for any `Document`.
-- `layoutPage` and `layoutMultiColumnPage` expose the raw layout engine.
+- `loadEpub(bytes)` parses an EPUB archive into a `Document`, TOC tree, image map, and href target map.
+- `EpubReader` provides swipe navigation, TOC jumps, link handling, and progress persistence hooks.
+- `PagedReader` gives you a paginated `PageView` surface for any `Document`.
+- `DocumentView` renders a single laid-out page when you want custom chrome.
+- `layoutPage` and `layoutMultiColumnPage` expose the raw engine output for custom readers and editorial layouts.
 
-## Example
+## Example App
 
-Run the example app to see:
+The example app currently demos:
 
 - EPUB reader flow
 - simple pagination
@@ -78,3 +102,14 @@ Run the example app to see:
 cd example
 flutter run
 ```
+
+## Current Status
+
+The engine is already strong for:
+
+- paginated reading
+- obstacle-aware editorial layouts
+- EPUB chapter/TOC ingestion
+- in-book navigation through resolved href targets
+
+The next reader-product layers are richer interaction features such as selection, highlights, bookmarks, search, and stronger external-link handling out of the box.
