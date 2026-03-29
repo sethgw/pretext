@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
@@ -56,23 +57,23 @@ class PagePainter extends CustomPainter {
         Offset(rule.x + rule.width, rule.y),
         Paint()
           ..color = ruleColor
-          ..strokeWidth = 1.0,
+          ..strokeWidth = rule.thickness,
       );
     }
 
     // Paint images
-    if (imageResolver != null) {
-      for (final image in page.images) {
-        final resolved = imageResolver!(image.src);
-        if (resolved != null) {
-          final srcRect = Rect.fromLTWH(
-            0,
-            0,
-            resolved.width.toDouble(),
-            resolved.height.toDouble(),
-          );
-          canvas.drawImageRect(resolved, srcRect, image.rect, Paint());
-        }
+    for (final image in page.images) {
+      final resolved = imageResolver?.call(image.src);
+      if (resolved != null) {
+        final srcRect = Rect.fromLTWH(
+          0,
+          0,
+          resolved.width.toDouble(),
+          resolved.height.toDouble(),
+        );
+        canvas.drawImageRect(resolved, srcRect, image.rect, Paint());
+      } else {
+        _paintImagePlaceholder(canvas, image);
       }
     }
 
@@ -85,6 +86,39 @@ class PagePainter extends CustomPainter {
     for (final dropCap in page.dropCaps) {
       canvas.drawParagraph(dropCap.paragraph, Offset(dropCap.x, dropCap.y));
     }
+  }
+
+  void _paintImagePlaceholder(Canvas canvas, LayoutImage image) {
+    final fillPaint = Paint()..color = const Color(0x12000000);
+    final strokePaint = Paint()
+      ..color = const Color(0x33000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    canvas.drawRect(image.rect, fillPaint);
+    canvas.drawRect(image.rect, strokePaint);
+
+    final label = (image.alt != null && image.alt!.trim().isNotEmpty)
+        ? image.alt!.trim()
+        : image.src;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0x99000000),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 3,
+      ellipsis: '...',
+    )..layout(maxWidth: math.max(1.0, image.rect.width - 16));
+
+    final textOffset = Offset(
+      image.rect.left + 8,
+      image.rect.top + (image.rect.height - textPainter.height) / 2,
+    );
+    textPainter.paint(canvas, textOffset);
   }
 
   void _paintObstacles(Canvas canvas, Size size) {
@@ -124,6 +158,9 @@ class PagePainter extends CustomPainter {
   bool shouldRepaint(PagePainter oldDelegate) {
     return !identical(page, oldDelegate.page) ||
         backgroundColor != oldDelegate.backgroundColor ||
-        debugObstacles != oldDelegate.debugObstacles;
+        debugObstacles != oldDelegate.debugObstacles ||
+        ruleColor != oldDelegate.ruleColor ||
+        imageResolver != oldDelegate.imageResolver ||
+        !identical(obstacles, oldDelegate.obstacles);
   }
 }

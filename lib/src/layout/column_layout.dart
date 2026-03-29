@@ -30,6 +30,9 @@ LayoutPage layoutMultiColumnPage({
   final columnWidth = (contentRect.width - totalGap) / columnCount;
 
   final allLines = <LayoutLine>[];
+  final allImages = <LayoutImage>[];
+  final allRules = <LayoutRule>[];
+  final allDropCaps = <LayoutDropCap>[];
   var cursor = startCursor;
 
   for (int col = 0; col < columnCount; col++) {
@@ -62,6 +65,24 @@ LayoutPage layoutMultiColumnPage({
         y: line.y + contentRect.top,
       ));
     }
+    for (final image in colPage.images) {
+      allImages.add(image.copyWith(
+        rect: image.rect.shift(Offset(colX, contentRect.top)),
+      ));
+    }
+    for (final rule in colPage.rules) {
+      allRules.add(rule.copyWith(
+        x: rule.x + colX,
+        y: rule.y + contentRect.top,
+      ));
+    }
+    for (final dropCap in colPage.dropCaps) {
+      allDropCaps.add(LayoutDropCap(
+        paragraph: dropCap.paragraph,
+        x: dropCap.x + colX,
+        y: dropCap.y + contentRect.top,
+      ));
+    }
 
     // Hand off cursor to next column
     cursor = colPage.endCursor;
@@ -69,6 +90,9 @@ LayoutPage layoutMultiColumnPage({
 
   return LayoutPage(
     lines: allLines,
+    images: allImages,
+    rules: allRules,
+    dropCaps: allDropCaps,
     startCursor: startCursor,
     endCursor: cursor,
     size: pageSize,

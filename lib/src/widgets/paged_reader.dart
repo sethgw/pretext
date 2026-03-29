@@ -64,6 +64,9 @@ class PagedReaderState extends State<PagedReader> {
   final _cursorToPage = <String, int>{};
   late PageController _pageController;
   Size? _lastSize;
+  DocumentCursor? _pendingCursorNavigation;
+  int _restoreGeneration = 0;
+  bool _pendingCursorScheduled = false;
   int _currentPageIndex = 0;
   int? _totalPages;
 
@@ -80,8 +83,10 @@ class PagedReaderState extends State<PagedReader> {
     final bookId = widget.bookId;
     if (store == null || bookId == null) return;
 
+    final generation = ++_restoreGeneration;
     final cursor = await store.load(bookId);
-    if (cursor != null && mounted) {
+    if (!mounted || generation != _restoreGeneration) return;
+    if (cursor != null) {
       goToCursor(cursor);
     }
   }
@@ -116,6 +121,8 @@ class PagedReaderState extends State<PagedReader> {
 
     if (widget.progressStore != oldWidget.progressStore ||
         widget.bookId != oldWidget.bookId) {
+      _restoreGeneration++;
+      _pendingCursorNavigation = null;
       _restoreProgress();
     }
   }
@@ -192,6 +199,7 @@ class PagedReaderState extends State<PagedReader> {
 
   /// Navigate to a specific page by index.
   void goToPage(int index) {
+    _pendingCursorNavigation = null;
     if (_pageController.hasClients) {
       _pageController.jumpToPage(index);
     }
@@ -199,6 +207,12 @@ class PagedReaderState extends State<PagedReader> {
 
   /// Navigate to a page containing the given cursor.
   void goToCursor(DocumentCursor cursor) {
+    if (!_pageController.hasClients || _lastSize == null) {
+      _pendingCursorNavigation = cursor;
+      return;
+    }
+
+    _pendingCursorNavigation = null;
     final serialized = cursor.serialize();
     if (_cursorToPage.containsKey(serialized)) {
       final pageIndex = _cursorToPage[serialized]!;
@@ -233,11 +247,30 @@ class PagedReaderState extends State<PagedReader> {
     return page.endCursor.progressIn(widget.document);
   }
 
+  void _schedulePendingCursorNavigation(Size pageSize) {
+    if (_pendingCursorNavigation == null || _pendingCursorScheduled) return;
+    _pendingCursorScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pendingCursorScheduled = false;
+      if (!mounted || _pendingCursorNavigation == null) return;
+
+      // Prime the page cache with the real viewport size before navigating.
+      _getPage(_currentPageIndex, pageSize);
+
+      final cursor = _pendingCursorNavigation;
+      if (cursor != null) {
+        goToCursor(cursor);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final pageSize = constraints.biggest;
+        _schedulePendingCursorNavigation(pageSize);
 
         return PageView.builder(
           controller: _pageController,

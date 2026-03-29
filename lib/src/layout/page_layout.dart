@@ -63,8 +63,9 @@ LayoutPage layoutPage({
     // --- ImageBlock: compute rect and add to images list ---
     if (block is ImageBlock) {
       final imgWidth = (block.width ?? contentRect.width)
-          .clamp(0.0, contentRect.width);
-      final imgHeight = block.height ?? (imgWidth * 0.75); // default 4:3
+          .clamp(0.0, contentRect.width)
+          .toDouble();
+      final imgHeight = (block.height ?? (imgWidth * 0.75)).toDouble();
 
       if (y + imgHeight <= contentRect.bottom) {
         // Center the image horizontally.
@@ -211,6 +212,9 @@ LayoutPage layoutPage({
     lines.addAll(bandLayout.lines);
     cursor = cursor.advanceBy(bandLayout.consumedChars);
     y += bandLayout.bandHeight;
+    if (!cursor.isAtBlockEnd(document) && bandLayout.trailingSpacing > 0) {
+      y += bandLayout.trailingSpacing;
+    }
 
     // If the current block is exhausted, advance to the next block.
     if (cursor.isAtBlockEnd(document)) {
@@ -326,11 +330,13 @@ _ResolvedBlock _resolveBlockAtOffset(
         spans: spans,
         style: config.baseTextStyle,
         localOffset: textOffset,
+        segmentLength: spans.fold(0, (sum, span) => sum + span.length),
       ),
     HeadingBlock(:final level, :final spans) => _ResolvedBlock(
         spans: spans,
         style: headingStyleOverride ?? config.headingStyle(level),
         localOffset: textOffset,
+        segmentLength: spans.fold(0, (sum, span) => sum + span.length),
       ),
     ListBlock() => _resolveListItem(block, config, textOffset),
     BlockquoteBlock() => _resolveBlockquoteChild(block, config, textOffset),
@@ -338,6 +344,7 @@ _ResolvedBlock _resolveBlockAtOffset(
         spans: null,
         style: config.baseTextStyle,
         localOffset: textOffset,
+        segmentLength: 0,
       ),
   };
 }
@@ -348,26 +355,40 @@ _ResolvedBlock _resolveListItem(
   LayoutConfig config,
   int textOffset,
 ) {
-  int consumed = 0;
+  final nonEmptyItems = <({int index, List<AttributedSpan> spans, int length})>[];
   for (int i = 0; i < block.items.length; i++) {
-    final itemLen =
+    final itemLength =
         block.items[i].fold(0, (sum, span) => sum + span.length);
-    if (textOffset < consumed + itemLen) {
-      final markerText = block.ordered ? '${i + 1}.' : '\u2022';
+    if (itemLength > 0) {
+      nonEmptyItems.add((index: i, spans: block.items[i], length: itemLength));
+    }
+  }
+
+  int consumed = 0;
+  for (int itemIndex = 0; itemIndex < nonEmptyItems.length; itemIndex++) {
+    final item = nonEmptyItems[itemIndex];
+    if (textOffset < consumed + item.length) {
+      final markerText = block.ordered ? '${item.index + 1}.' : '\u2022';
+      final isLastItem = itemIndex == nonEmptyItems.length - 1;
       return _ResolvedBlock(
-        spans: block.items[i],
+        spans: item.spans,
         style: config.baseTextStyle,
         localOffset: textOffset - consumed,
+        segmentLength: item.length,
         leftIndent: config.listIndent,
         markerText: markerText,
+        spacingAfterSegment: isLastItem ? 0 : config.blockSpacing,
+        completesCurrentBlockWhenSegmentEnds: isLastItem,
       );
     }
-    consumed += itemLen;
+    consumed += item.length;
   }
+
   return _ResolvedBlock(
     spans: null,
     style: config.baseTextStyle,
     localOffset: 0,
+    segmentLength: 0,
   );
 }
 
@@ -377,26 +398,46 @@ _ResolvedBlock _resolveBlockquoteChild(
   LayoutConfig config,
   int textOffset,
 ) {
-  int consumed = 0;
+  final textChildren = <({int index, Block block, int length})>[];
   for (int i = 0; i < block.children.length; i++) {
-    final childLen = block.children[i].textLength;
-    if (textOffset < consumed + childLen) {
-      final child = block.children[i];
+    final childLength = block.children[i].textLength;
+    if (childLength > 0) {
+      textChildren.add((index: i, block: block.children[i], length: childLength));
+    }
+  }
+
+  int consumed = 0;
+  for (int childIndex = 0; childIndex < textChildren.length; childIndex++) {
+    final childEntry = textChildren[childIndex];
+    if (textOffset < consumed + childEntry.length) {
+      final child = childEntry.block;
       final childResolved =
           _resolveBlockAtOffset(child, config, textOffset - consumed);
+      final isLastChild = childIndex == textChildren.length - 1;
+      final spacingAfterSegment =
+          childResolved.spacingAfterSegment +
+          (childResolved.completesCurrentBlockWhenSegmentEnds && !isLastChild
+              ? config.blockSpacing
+              : 0);
       return _ResolvedBlock(
         spans: childResolved.spans,
         style: childResolved.style,
         localOffset: childResolved.localOffset,
+        segmentLength: childResolved.segmentLength,
         leftIndent: childResolved.leftIndent + config.blockquoteIndent,
+        markerText: childResolved.markerText,
+        spacingAfterSegment: spacingAfterSegment,
+        completesCurrentBlockWhenSegmentEnds:
+            childResolved.completesCurrentBlockWhenSegmentEnds && isLastChild,
       );
     }
-    consumed += childLen;
+    consumed += childEntry.length;
   }
   return _ResolvedBlock(
     spans: null,
     style: config.baseTextStyle,
     localOffset: 0,
+    segmentLength: 0,
   );
 }
 
@@ -451,6 +492,7 @@ _BandLayout _layoutTextBand({
   var currentCursor = cursor;
   var maxHeight = 0.0;
   var markerAdded = false;
+  var trailingSpacing = 0.0;
 
   for (final slot in slots) {
     if (currentCursor.textOffset >= block.textLength) break;
@@ -475,6 +517,7 @@ _BandLayout _layoutTextBand({
     final positionedLine = line.copyWith(x: slot.left, y: y);
     lines.add(positionedLine);
     maxHeight = math.max(maxHeight, positionedLine.height);
+    final charsConsumed = line.end.textOffset - line.start.textOffset;
 
     if (!markerAdded &&
         current.markerText != null &&
@@ -493,6 +536,12 @@ _BandLayout _layoutTextBand({
     }
 
     currentCursor = line.end;
+    final segmentComplete =
+        current.localOffset + charsConsumed >= current.segmentLength;
+    if (segmentComplete) {
+      trailingSpacing = current.spacingAfterSegment;
+      break;
+    }
     if (line.hardBreak) break;
   }
 
@@ -500,6 +549,7 @@ _BandLayout _layoutTextBand({
     lines: lines,
     consumedChars: currentCursor.textOffset - cursor.textOffset,
     bandHeight: maxHeight == 0 ? bandHeight : maxHeight,
+    trailingSpacing: trailingSpacing,
   );
 }
 

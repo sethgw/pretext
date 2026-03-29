@@ -214,8 +214,7 @@ void _processBlockElement(
       }
 
     case 'table':
-      // Tables are skipped for now.
-      break;
+      _processTable(element, context, resolvedStyle);
 
     // Transparent wrapper elements — recurse into children.
     case 'div':
@@ -417,7 +416,7 @@ SpanStyle _resolveInlineStyle(
           const SpanStyle(decoration: TextDecoration.lineThrough));
     case 'sup':
     case 'sub':
-      style = style.mergeWith(const SpanStyle(fontSize: 0.8));
+      style = style.mergeWith(const SpanStyle(fontSizeScale: 0.8));
     case 'span':
       // No semantic style — CSS rules above are sufficient.
       break;
@@ -480,6 +479,182 @@ void _processFigure(
       width: width,
       height: height,
     ));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Table processing
+// ---------------------------------------------------------------------------
+
+/// Flatten a table into readable paragraphs so EPUB table content is not lost.
+///
+/// Captions become their own paragraph block. Each row becomes a paragraph with
+/// cells separated by ` | `. Nested block content inside a cell is flattened in
+/// reading order, using ` / ` between block fragments within the same cell.
+void _processTable(
+  html_dom.Element table,
+  _ParseContext context,
+  SpanStyle inheritedStyle,
+) {
+  html_dom.Element? caption;
+  final rows = <html_dom.Element>[];
+
+  for (final child in table.children) {
+    final tag = child.localName?.toLowerCase();
+    switch (tag) {
+      case 'caption':
+        caption ??= child;
+      case 'thead':
+      case 'tbody':
+      case 'tfoot':
+        rows.addAll(_collectTableRows(child));
+      case 'tr':
+        rows.add(child);
+    }
+  }
+
+  if (caption != null) {
+    _recordAnchor(caption, context);
+    final captionStyle =
+        _resolveStyle(caption, 'caption', context, inheritedStyle);
+    final captionSpans = _normalizeSpans(
+      _collectTableCellSpans(caption, context, captionStyle),
+    );
+    if (captionSpans.isNotEmpty) {
+      context.blocks.add(ParagraphBlock(captionSpans));
+    }
+  }
+
+  for (final row in rows) {
+    _recordAnchor(row, context);
+    final rowSpans = _normalizeSpans(
+      _flattenTableRow(row, context, inheritedStyle),
+    );
+    if (rowSpans.isNotEmpty) {
+      context.blocks.add(ParagraphBlock(rowSpans));
+    }
+  }
+}
+
+Iterable<html_dom.Element> _collectTableRows(html_dom.Element parent) sync* {
+  for (final child in parent.children) {
+    final tag = child.localName?.toLowerCase();
+    switch (tag) {
+      case 'tr':
+        yield child;
+      case 'thead':
+      case 'tbody':
+      case 'tfoot':
+        yield* _collectTableRows(child);
+    }
+  }
+}
+
+List<AttributedSpan> _flattenTableRow(
+  html_dom.Element row,
+  _ParseContext context,
+  SpanStyle inheritedStyle,
+) {
+  final spans = <AttributedSpan>[];
+  var wroteCell = false;
+
+  for (final cell in row.children) {
+    final tag = cell.localName?.toLowerCase();
+    if (tag != 'td' && tag != 'th') continue;
+
+    _recordAnchor(cell, context);
+    var cellStyle = _resolveStyle(cell, tag!, context, inheritedStyle);
+    if (tag == 'th') {
+      cellStyle = cellStyle.mergeWith(const SpanStyle(bold: true));
+    }
+
+    final cellSpans = _normalizeSpans(
+      _collectTableCellSpans(cell, context, cellStyle),
+    );
+    if (cellSpans.isEmpty) continue;
+
+    if (wroteCell) {
+      spans.add(AttributedSpan(' | ', style: inheritedStyle));
+    }
+    spans.addAll(cellSpans);
+    wroteCell = true;
+  }
+
+  return spans;
+}
+
+List<AttributedSpan> _collectTableCellSpans(
+  html_dom.Element cell,
+  _ParseContext context,
+  SpanStyle inheritedStyle,
+) {
+  final spans = <AttributedSpan>[];
+  _walkTableCellChildren(cell, context, inheritedStyle, spans);
+  return spans;
+}
+
+void _walkTableCellChildren(
+  html_dom.Node parent,
+  _ParseContext context,
+  SpanStyle inheritedStyle,
+  List<AttributedSpan> spans,
+) {
+  for (final child in parent.nodes) {
+    if (child is html_dom.Text) {
+      final text = _collapseWhitespace(child.text);
+      if (text.isNotEmpty) {
+        spans.add(AttributedSpan(text, style: inheritedStyle));
+      }
+      continue;
+    }
+
+    if (child is! html_dom.Element) continue;
+
+    final tag = child.localName?.toLowerCase() ?? '';
+    _recordAnchor(child, context);
+
+    if (tag == 'br') {
+      spans.add(AttributedSpan('\n', style: inheritedStyle));
+      continue;
+    }
+
+    if (tag == 'img') {
+      final alt = child.attributes['alt'];
+      if (alt != null && alt.isNotEmpty) {
+        spans.add(AttributedSpan(alt, style: inheritedStyle));
+      }
+      continue;
+    }
+
+    final resolvedStyle = _isTableCellBoundaryTag(tag)
+        ? _resolveStyle(child, tag, context, inheritedStyle)
+        : _resolveInlineStyle(child, tag, context, inheritedStyle);
+    final childSpans = <AttributedSpan>[];
+    _walkTableCellChildren(child, context, resolvedStyle, childSpans);
+    final normalized = _normalizeSpans(childSpans);
+    if (normalized.isEmpty) continue;
+
+    if (_isTableCellBoundaryTag(tag) && spans.isNotEmpty) {
+      spans.add(AttributedSpan(' / ', style: inheritedStyle));
+    }
+    spans.addAll(normalized);
+  }
+}
+
+bool _isTableCellBoundaryTag(String tag) {
+  switch (tag) {
+    case 'caption':
+    case 'li':
+    case 'table':
+    case 'tbody':
+    case 'td':
+    case 'tfoot':
+    case 'th':
+    case 'thead':
+    case 'tr':
+      return true;
+    default:
+      return _blockElements.contains(tag);
   }
 }
 

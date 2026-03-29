@@ -113,19 +113,65 @@ String _stripQuotes(String s) {
   return v;
 }
 
-/// Parse a CSS numeric value, stripping a known unit suffix.
-///
-/// Returns the numeric portion, or `null` on failure.
-double? _parseNumeric(String value) {
+double? _parseAbsoluteNumeric(String value) {
   var v = value.trim().toLowerCase();
-  // Strip known units.
-  for (final unit in ['px', 'em', '%', 'pt', 'rem']) {
+  for (final unit in ['px', 'pt']) {
     if (v.endsWith(unit)) {
       v = v.substring(0, v.length - unit.length).trim();
       break;
     }
   }
   return double.tryParse(v);
+}
+
+({double? absolute, double? scale}) _parseFontSize(String value) {
+  final v = value.trim().toLowerCase();
+  if (v.endsWith('%')) {
+    final number = double.tryParse(v.substring(0, v.length - 1).trim());
+    return (absolute: null, scale: number != null ? number / 100 : null);
+  }
+  for (final unit in ['em', 'rem']) {
+    if (v.endsWith(unit)) {
+      final number = double.tryParse(v.substring(0, v.length - unit.length).trim());
+      return (absolute: null, scale: number);
+    }
+  }
+
+  return (absolute: _parseAbsoluteNumeric(v), scale: null);
+}
+
+({double? absolute, double? scale}) _parseLetterSpacing(String value) {
+  final v = value.trim().toLowerCase();
+  for (final unit in ['em', 'rem']) {
+    if (v.endsWith(unit)) {
+      final number = double.tryParse(v.substring(0, v.length - unit.length).trim());
+      return (absolute: null, scale: number);
+    }
+  }
+
+  return (absolute: _parseAbsoluteNumeric(v), scale: null);
+}
+
+({double? multiplier, double? absolute}) _parseLineHeight(String value) {
+  final v = value.trim().toLowerCase();
+  if (v.endsWith('%')) {
+    final number = double.tryParse(v.substring(0, v.length - 1).trim());
+    return (multiplier: number != null ? number / 100 : null, absolute: null);
+  }
+  for (final unit in ['em', 'rem']) {
+    if (v.endsWith(unit)) {
+      final number = double.tryParse(v.substring(0, v.length - unit.length).trim());
+      return (multiplier: number, absolute: null);
+    }
+  }
+  for (final unit in ['px', 'pt']) {
+    if (v.endsWith(unit)) {
+      final number = double.tryParse(v.substring(0, v.length - unit.length).trim());
+      return (multiplier: null, absolute: number);
+    }
+  }
+
+  return (multiplier: double.tryParse(v), absolute: null);
 }
 
 /// Parse an inline `style` attribute string into a [SpanStyle].
@@ -141,11 +187,14 @@ SpanStyle parseInlineStyle(String styleAttr) {
   bool bold = false;
   bool italic = false;
   double? fontSize;
+  double? fontSizeScale;
   Color? color;
   String? fontFamily;
   TextDecoration? decoration;
   double? letterSpacing;
+  double? letterSpacingScale;
   double? height;
+  double? lineHeightPx;
   FontWeight? fontWeight;
 
   final declarations = trimmed.split(';');
@@ -166,7 +215,9 @@ SpanStyle parseInlineStyle(String styleAttr) {
         case 'font-style':
           if (value.trim().toLowerCase() == 'italic') italic = true;
         case 'font-size':
-          fontSize = _parseNumeric(value);
+          final size = _parseFontSize(value);
+          fontSize = size.absolute;
+          fontSizeScale = size.scale;
         case 'color':
           color = parseColor(value);
         case 'font-family':
@@ -178,9 +229,13 @@ SpanStyle parseInlineStyle(String styleAttr) {
         case 'text-decoration':
           decoration = _parseTextDecoration(value);
         case 'letter-spacing':
-          letterSpacing = _parseNumeric(value);
+          final spacing = _parseLetterSpacing(value);
+          letterSpacing = spacing.absolute;
+          letterSpacingScale = spacing.scale;
         case 'line-height':
-          height = _parseNumeric(value);
+          final lineHeight = _parseLineHeight(value);
+          height = lineHeight.multiplier;
+          lineHeightPx = lineHeight.absolute;
       }
     } catch (_) {
       // Skip malformed values.
@@ -191,11 +246,14 @@ SpanStyle parseInlineStyle(String styleAttr) {
   if (!bold &&
       !italic &&
       fontSize == null &&
+      fontSizeScale == null &&
       color == null &&
       fontFamily == null &&
       decoration == null &&
       letterSpacing == null &&
+      letterSpacingScale == null &&
       height == null &&
+      lineHeightPx == null &&
       fontWeight == null) {
     return SpanStyle.normal;
   }
@@ -204,11 +262,14 @@ SpanStyle parseInlineStyle(String styleAttr) {
     bold: bold,
     italic: italic,
     fontSize: fontSize,
+    fontSizeScale: fontSizeScale,
     color: color,
     fontFamily: fontFamily,
     decoration: decoration,
     letterSpacing: letterSpacing,
+    letterSpacingScale: letterSpacingScale,
     height: height,
+    lineHeightPx: lineHeightPx,
     fontWeight: fontWeight,
   );
 }

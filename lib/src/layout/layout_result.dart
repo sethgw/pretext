@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
@@ -192,4 +193,19 @@ class LayoutPage {
       images.isEmpty &&
       rules.isEmpty &&
       dropCaps.isEmpty;
+
+  /// Dispose all native paragraph resources owned by this page.
+  void dispose() {
+    final paragraphs = HashSet<ui.Paragraph>.identity();
+    for (final line in lines) {
+      if (paragraphs.add(line.paragraph)) {
+        line.paragraph.dispose();
+      }
+    }
+    for (final dropCap in dropCaps) {
+      if (paragraphs.add(dropCap.paragraph)) {
+        dropCap.paragraph.dispose();
+      }
+    }
+  }
 }

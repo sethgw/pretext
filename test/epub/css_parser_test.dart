@@ -83,12 +83,38 @@ void main() {
 
     test('parses font-size with em units', () {
       final style = parseInlineStyle('font-size: 1.2em');
-      expect(style.fontSize, 1.2);
+      expect(style.fontSize, isNull);
+      expect(style.fontSizeScale, 1.2);
     });
 
     test('parses font-size with percent units', () {
       final style = parseInlineStyle('font-size: 120%');
-      expect(style.fontSize, 120);
+      expect(style.fontSize, isNull);
+      expect(style.fontSizeScale, 1.2);
+    });
+
+    test('resolves relative font-size against the base text style', () {
+      final style = parseInlineStyle('font-size: 120%');
+      final resolved = style.toTextStyle(const TextStyle(fontSize: 20));
+      expect(resolved.fontSize, 24);
+    });
+
+    test('parses pixel line-height as an absolute line box height', () {
+      final style = parseInlineStyle('line-height: 24px');
+      expect(style.height, isNull);
+      expect(style.lineHeightPx, 24);
+
+      final resolved = style.toTextStyle(const TextStyle(fontSize: 16));
+      expect(resolved.height, 1.5);
+    });
+
+    test('parses em letter-spacing relative to font size', () {
+      final style = parseInlineStyle('letter-spacing: 0.1em');
+      expect(style.letterSpacing, isNull);
+      expect(style.letterSpacingScale, 0.1);
+
+      final resolved = style.toTextStyle(const TextStyle(fontSize: 20));
+      expect(resolved.letterSpacing, 2.0);
     });
   });
 

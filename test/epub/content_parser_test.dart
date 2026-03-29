@@ -138,14 +138,18 @@ void main() {
       );
 
       final block = result.chapter.blocks[0] as ParagraphBlock;
-      expect(block.spans[0].style.fontSize, 0.8);
+      expect(block.spans[0].style.fontSizeScale, 0.8);
+      expect(
+        block.spans[0].style.toTextStyle(const TextStyle(fontSize: 20)).fontSize,
+        16,
+      );
 
       final result2 = parseContentDocument(
         '<html><body><p><sub>sub</sub></p></body></html>',
       );
 
       final block2 = result2.chapter.blocks[0] as ParagraphBlock;
-      expect(block2.spans[0].style.fontSize, 0.8);
+      expect(block2.spans[0].style.fontSizeScale, 0.8);
     });
 
     test('<blockquote> produces BlockquoteBlock with children', () {
@@ -384,18 +388,45 @@ void main() {
       expect(block.spans[0].style.italic, isTrue);
     });
 
-    test('table elements are skipped', () {
+    test('table elements are flattened into readable row paragraphs', () {
       final result = parseContentDocument(
         '<html><body>'
         '<p>Before</p>'
-        '<table><tr><td>Cell</td></tr></table>'
+        '<table>'
+        '<tr><td>Left</td><td>Right</td></tr>'
+        '<tr><td>Bottom</td><td>Row</td></tr>'
+        '</table>'
         '<p>After</p>'
         '</body></html>',
       );
 
-      expect(result.chapter.blocks, hasLength(2));
+      expect(result.chapter.blocks, hasLength(4));
       expect((result.chapter.blocks[0] as ParagraphBlock).plainText, 'Before');
-      expect((result.chapter.blocks[1] as ParagraphBlock).plainText, 'After');
+      expect((result.chapter.blocks[1] as ParagraphBlock).plainText, 'Left | Right');
+      expect((result.chapter.blocks[2] as ParagraphBlock).plainText, 'Bottom | Row');
+      expect((result.chapter.blocks[3] as ParagraphBlock).plainText, 'After');
+    });
+
+    test('table captions and header cells are preserved when flattened', () {
+      final result = parseContentDocument(
+        '<html><body>'
+        '<table>'
+        '<caption>Statistics</caption>'
+        '<thead><tr><th>Label</th><th>Value</th></tr></thead>'
+        '<tbody><tr><td><p>Alpha</p><p>Beta</p></td><td>42</td></tr></tbody>'
+        '</table>'
+        '</body></html>',
+      );
+
+      expect(result.chapter.blocks, hasLength(3));
+      expect((result.chapter.blocks[0] as ParagraphBlock).plainText, 'Statistics');
+
+      final headerRow = result.chapter.blocks[1] as ParagraphBlock;
+      expect(headerRow.plainText, 'Label | Value');
+      expect(headerRow.spans.first.style.bold, isTrue);
+
+      final bodyRow = result.chapter.blocks[2] as ParagraphBlock;
+      expect(bodyRow.plainText, 'Alpha / Beta | 42');
     });
 
     test('<img> without src produces no block', () {
