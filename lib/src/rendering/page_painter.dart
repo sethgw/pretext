@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
@@ -16,11 +18,20 @@ class PagePainter extends CustomPainter {
   final bool debugObstacles;
   final List<Obstacle> obstacles;
 
+  /// Optional callback to resolve image src paths to decoded images.
+  /// If null, images are not painted.
+  final ui.Image? Function(String src)? imageResolver;
+
+  /// Color for horizontal rules. Defaults to 20% opacity black.
+  final Color ruleColor;
+
   const PagePainter({
     required this.page,
     this.backgroundColor,
     this.debugObstacles = false,
     this.obstacles = const [],
+    this.imageResolver,
+    this.ruleColor = const Color(0x33000000),
   });
 
   @override
@@ -36,6 +47,33 @@ class PagePainter extends CustomPainter {
     // Debug: paint obstacle shapes
     if (debugObstacles) {
       _paintObstacles(canvas, size);
+    }
+
+    // Paint horizontal rules
+    for (final rule in page.rules) {
+      canvas.drawLine(
+        Offset(rule.x, rule.y),
+        Offset(rule.x + rule.width, rule.y),
+        Paint()
+          ..color = ruleColor
+          ..strokeWidth = 1.0,
+      );
+    }
+
+    // Paint images
+    if (imageResolver != null) {
+      for (final image in page.images) {
+        final resolved = imageResolver!(image.src);
+        if (resolved != null) {
+          final srcRect = Rect.fromLTWH(
+            0,
+            0,
+            resolved.width.toDouble(),
+            resolved.height.toDouble(),
+          );
+          canvas.drawImageRect(resolved, srcRect, image.rect, Paint());
+        }
+      }
     }
 
     // Paint each positioned text line

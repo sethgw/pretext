@@ -89,6 +89,15 @@ class LayoutImage {
   });
 }
 
+/// A horizontal rule positioned on a page.
+class LayoutRule {
+  final double x;
+  final double y;
+  final double width;
+
+  const LayoutRule({required this.x, required this.y, required this.width});
+}
+
 /// A complete laid-out page — the output of the layout engine.
 ///
 /// Contains all positioned lines and images, plus the cursor range
@@ -99,6 +108,9 @@ class LayoutPage {
 
   /// All positioned images on this page.
   final List<LayoutImage> images;
+
+  /// All horizontal rules on this page.
+  final List<LayoutRule> rules;
 
   /// Cursor at the start of this page's content.
   final DocumentCursor startCursor;
@@ -112,6 +124,7 @@ class LayoutPage {
   const LayoutPage({
     required this.lines,
     this.images = const [],
+    this.rules = const [],
     required this.startCursor,
     required this.endCursor,
     required this.size,

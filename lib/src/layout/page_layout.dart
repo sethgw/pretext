@@ -36,33 +36,60 @@ LayoutPage layoutPage({
   );
 
   final lines = <LayoutLine>[];
+  final images = <LayoutImage>[];
+  final rules = <LayoutRule>[];
   double y = contentRect.top;
   var cursor = startCursor;
 
   while (y + config.lineHeight <= contentRect.bottom) {
-    // Check if we've reached the end of the document
     if (cursor.isAtEnd(document)) break;
 
     final block = document.blockAt(cursor);
     if (block == null) break;
 
-    // Skip non-text blocks for now (images, rules)
-    if (block is ImageBlock || block is HorizontalRuleBlock) {
-      if (block is HorizontalRuleBlock) {
-        y += config.blockSpacing;
+    // --- ImageBlock: compute rect and add to images list ---
+    if (block is ImageBlock) {
+      final imgWidth = (block.width ?? contentRect.width)
+          .clamp(0.0, contentRect.width);
+      final imgHeight = block.height ?? (imgWidth * 0.75); // default 4:3
+
+      if (y + imgHeight <= contentRect.bottom) {
+        // Center the image horizontally.
+        final imgX = contentRect.left + (contentRect.width - imgWidth) / 2;
+        images.add(LayoutImage(
+          src: block.src,
+          rect: Rect.fromLTWH(imgX, y, imgWidth, imgHeight),
+          alt: block.alt,
+        ));
+        y += imgHeight + config.blockSpacing;
+      } else {
+        // Image doesn't fit — stop this page.
+        break;
       }
       cursor = cursor.nextBlock(document);
       continue;
     }
 
-    // Resolve the spans and base style for this block
-    final (spans, baseStyle) = _resolveBlock(block, config);
-    if (spans == null) {
+    // --- HorizontalRuleBlock: draw a rule line ---
+    if (block is HorizontalRuleBlock) {
+      rules.add(LayoutRule(
+        x: contentRect.left,
+        y: y + config.lineHeight / 2,
+        width: contentRect.width,
+      ));
+      y += config.lineHeight;
       cursor = cursor.nextBlock(document);
       continue;
     }
 
-    // Compute available horizontal slots for this line band
+    // --- Resolve spans for the current cursor position ---
+    final resolved = _resolveBlockAtOffset(block, config, cursor.textOffset);
+    if (resolved.spans == null) {
+      cursor = cursor.nextBlock(document);
+      continue;
+    }
+
+    // --- Compute available horizontal slots ---
     final bandTop = y;
     final bandBottom = y + config.lineHeight;
     final blocked = <Interval>[];
@@ -74,27 +101,31 @@ LayoutPage layoutPage({
     }
 
     final slots = carveSlots(
-      Interval(contentRect.left, contentRect.right),
+      Interval(contentRect.left + resolved.leftIndent, contentRect.right),
       blocked,
       minWidth: config.minSlotWidth,
     );
 
     if (slots.isEmpty) {
-      // Entire line band is blocked by obstacles — skip down
       y += config.lineHeight;
       continue;
     }
 
-    // Fill each available slot with text
+    // --- Fill each available slot with text ---
     bool anyLineProduced = false;
     for (final slot in slots) {
       if (cursor.isAtBlockEnd(document)) break;
 
+      // Re-resolve in case cursor advanced into a new sub-element.
+      final current =
+          _resolveBlockAtOffset(block, config, cursor.textOffset);
+      if (current.spans == null) break;
+
       final line = lineBreaker.layoutNextLine(
-        spans: spans,
-        textOffset: cursor.textOffset,
+        spans: current.spans!,
+        textOffset: current.localOffset,
         maxWidth: slot.width,
-        baseStyle: baseStyle,
+        baseStyle: current.style,
         cursorBase: cursor,
       );
 
@@ -106,14 +137,13 @@ LayoutPage layoutPage({
     }
 
     if (!anyLineProduced) {
-      // No text could be placed — skip this band
       y += config.lineHeight;
       continue;
     }
 
     y += config.lineHeight;
 
-    // If the current block is exhausted, advance to the next block
+    // If the current block is exhausted, advance to the next block.
     if (cursor.isAtBlockEnd(document)) {
       cursor = cursor.nextBlock(document);
       y += config.blockSpacing;
@@ -122,6 +152,8 @@ LayoutPage layoutPage({
 
   return LayoutPage(
     lines: lines,
+    images: images,
+    rules: rules,
     startCursor: startCursor,
     endCursor: cursor,
     size: pageSize,
@@ -162,25 +194,108 @@ List<LayoutPage> layoutDocument({
   return pages;
 }
 
-/// Resolve a block's spans and base text style.
-(List<AttributedSpan>?, TextStyle) _resolveBlock(
+// ---------------------------------------------------------------------------
+// Block resolution
+// ---------------------------------------------------------------------------
+
+/// Resolved spans for a position within a block.
+class _ResolvedBlock {
+  final List<AttributedSpan>? spans;
+  final TextStyle style;
+  final int localOffset;
+  final double leftIndent;
+
+  const _ResolvedBlock({
+    required this.spans,
+    required this.style,
+    required this.localOffset,
+    this.leftIndent = 0,
+  });
+}
+
+/// Resolve the spans, style, and local offset for a position within [block].
+///
+/// For compound blocks (ListBlock, BlockquoteBlock), this finds the right
+/// sub-element based on [textOffset] and returns the correct local offset
+/// for the line breaker.
+_ResolvedBlock _resolveBlockAtOffset(
   Block block,
   LayoutConfig config,
+  int textOffset,
 ) {
   return switch (block) {
-    ParagraphBlock(:final spans) => (spans, config.baseTextStyle),
-    HeadingBlock(:final level, :final spans) => (
-        spans,
-        config.headingStyle(level)
+    ParagraphBlock(:final spans) => _ResolvedBlock(
+        spans: spans,
+        style: config.baseTextStyle,
+        localOffset: textOffset,
       ),
-    BlockquoteBlock(:final children) => _resolveBlock(
-        children.firstOrNull ?? const ParagraphBlock([]),
-        config,
+    HeadingBlock(:final level, :final spans) => _ResolvedBlock(
+        spans: spans,
+        style: config.headingStyle(level),
+        localOffset: textOffset,
       ),
-    ListBlock(:final items) when items.isNotEmpty => (
-        items.first,
-        config.baseTextStyle
+    ListBlock() => _resolveListItem(block, config, textOffset),
+    BlockquoteBlock() => _resolveBlockquoteChild(block, config, textOffset),
+    _ => _ResolvedBlock(
+        spans: null,
+        style: config.baseTextStyle,
+        localOffset: textOffset,
       ),
-    _ => (null, config.baseTextStyle),
   };
+}
+
+/// Find the current item within a [ListBlock] and return its spans.
+_ResolvedBlock _resolveListItem(
+  ListBlock block,
+  LayoutConfig config,
+  int textOffset,
+) {
+  int consumed = 0;
+  for (int i = 0; i < block.items.length; i++) {
+    final itemLen =
+        block.items[i].fold(0, (sum, span) => sum + span.length);
+    if (textOffset < consumed + itemLen) {
+      return _ResolvedBlock(
+        spans: block.items[i],
+        style: config.baseTextStyle,
+        localOffset: textOffset - consumed,
+        leftIndent: config.listIndent,
+      );
+    }
+    consumed += itemLen;
+  }
+  return _ResolvedBlock(
+    spans: null,
+    style: config.baseTextStyle,
+    localOffset: 0,
+  );
+}
+
+/// Find the current child block within a [BlockquoteBlock] and resolve it.
+_ResolvedBlock _resolveBlockquoteChild(
+  BlockquoteBlock block,
+  LayoutConfig config,
+  int textOffset,
+) {
+  int consumed = 0;
+  for (int i = 0; i < block.children.length; i++) {
+    final childLen = block.children[i].textLength;
+    if (textOffset < consumed + childLen) {
+      final child = block.children[i];
+      final childResolved =
+          _resolveBlockAtOffset(child, config, textOffset - consumed);
+      return _ResolvedBlock(
+        spans: childResolved.spans,
+        style: childResolved.style,
+        localOffset: childResolved.localOffset,
+        leftIndent: childResolved.leftIndent + config.blockquoteIndent,
+      );
+    }
+    consumed += childLen;
+  }
+  return _ResolvedBlock(
+    spans: null,
+    style: config.baseTextStyle,
+    localOffset: 0,
+  );
 }

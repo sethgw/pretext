@@ -34,6 +34,12 @@ class LayoutConfig {
   /// Slots narrower than this are skipped.
   final double minSlotWidth;
 
+  /// Left indent applied to list items (in logical pixels).
+  final double listIndent;
+
+  /// Left indent applied to blockquotes (in logical pixels).
+  final double blockquoteIndent;
+
   const LayoutConfig({
     required this.baseTextStyle,
     required this.lineHeight,
@@ -43,6 +49,8 @@ class LayoutConfig {
     this.headingStyleResolver,
     this.lookaheadChars = 500,
     this.minSlotWidth = 50.0,
+    this.listIndent = 24.0,
+    this.blockquoteIndent = 24.0,
   });
 
   /// Resolve the text style for a heading at the given [level].
@@ -72,6 +80,8 @@ class LayoutConfig {
     TextStyle Function(int level)? headingStyleResolver,
     int? lookaheadChars,
     double? minSlotWidth,
+    double? listIndent,
+    double? blockquoteIndent,
   }) {
     return LayoutConfig(
       baseTextStyle: baseTextStyle ?? this.baseTextStyle,
@@ -82,6 +92,8 @@ class LayoutConfig {
       headingStyleResolver: headingStyleResolver ?? this.headingStyleResolver,
       lookaheadChars: lookaheadChars ?? this.lookaheadChars,
       minSlotWidth: minSlotWidth ?? this.minSlotWidth,
+      listIndent: listIndent ?? this.listIndent,
+      blockquoteIndent: blockquoteIndent ?? this.blockquoteIndent,
     );
   }
 }

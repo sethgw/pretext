@@ -29,3 +29,6 @@ export 'src/rendering/page_painter.dart';
 // Widgets
 export 'src/widgets/document_view.dart';
 export 'src/widgets/paged_reader.dart';
+
+// EPUB
+export 'src/epub/epub.dart';
