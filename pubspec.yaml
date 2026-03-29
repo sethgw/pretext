@@ -1,0 +1,20 @@
+name: pretext
+description: >
+  A Pretext-inspired native text layout engine for Flutter.
+  Pagination, multi-column flow, obstacle-aware text wrapping,
+  drop caps, and pull quotes — all without WebView.
+version: 0.0.1
+homepage: https://github.com/sethgw/pretext
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0

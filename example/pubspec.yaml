@@ -1,0 +1,15 @@
+name: pretext_example
+description: Example app showcasing Pretext layout capabilities.
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  pretext:
+    path: ../
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
