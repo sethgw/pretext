@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/widgets.dart';
 
 import 'package:pretext/src/document/document.dart';
@@ -29,6 +31,7 @@ class PagedReader extends StatefulWidget {
   final List<Obstacle> Function(int pageIndex, Size pageSize)? obstacleBuilder;
   final Color? backgroundColor;
   final bool debugObstacles;
+  final ui.Image? Function(String src)? imageResolver;
 
   /// Optional store for persisting reading progress across sessions.
   final ProgressStore? progressStore;
@@ -47,6 +50,7 @@ class PagedReader extends StatefulWidget {
     this.obstacleBuilder,
     this.backgroundColor,
     this.debugObstacles = false,
+    this.imageResolver,
     this.progressStore,
     this.bookId,
   });
@@ -93,6 +97,7 @@ class PagedReaderState extends State<PagedReader> {
 
   @override
   void dispose() {
+    _disposeCachedPages();
     _pageController.dispose();
     super.dispose();
   }
@@ -100,17 +105,39 @@ class PagedReaderState extends State<PagedReader> {
   @override
   void didUpdateWidget(PagedReader oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.document != oldWidget.document ||
-        widget.config != oldWidget.config) {
-      _invalidateCache();
+    final layoutInputsChanged =
+        widget.document != oldWidget.document ||
+        widget.config != oldWidget.config ||
+        widget.initialCursor != oldWidget.initialCursor ||
+        widget.obstacleBuilder != oldWidget.obstacleBuilder;
+    if (layoutInputsChanged) {
+      _invalidateCache(resetPageIndex: widget.initialCursor != oldWidget.initialCursor);
+    }
+
+    if (widget.progressStore != oldWidget.progressStore ||
+        widget.bookId != oldWidget.bookId) {
+      _restoreProgress();
     }
   }
 
-  void _invalidateCache() {
+  void _invalidateCache({bool resetPageIndex = false}) {
+    _disposeCachedPages();
     _pageCache.clear();
     _cursorToPage.clear();
     _totalPages = null;
     _lastSize = null;
+    if (resetPageIndex) {
+      _currentPageIndex = 0;
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      }
+    }
+  }
+
+  void _disposeCachedPages() {
+    for (final page in _pageCache.values) {
+      page.dispose();
+    }
   }
 
   /// Get or compute the page at [index].
@@ -163,7 +190,14 @@ class PagedReaderState extends State<PagedReader> {
     return page;
   }
 
-  /// Navigate to the page containing the given cursor.
+  /// Navigate to a specific page by index.
+  void goToPage(int index) {
+    if (_pageController.hasClients) {
+      _pageController.jumpToPage(index);
+    }
+  }
+
+  /// Navigate to a page containing the given cursor.
   void goToCursor(DocumentCursor cursor) {
     final serialized = cursor.serialize();
     if (_cursorToPage.containsKey(serialized)) {
@@ -235,6 +269,7 @@ class PagedReaderState extends State<PagedReader> {
                 backgroundColor: widget.backgroundColor,
                 debugObstacles: widget.debugObstacles,
                 obstacles: obstacles,
+                imageResolver: widget.imageResolver,
               ),
             );
           },
