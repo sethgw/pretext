@@ -97,7 +97,7 @@ void main() {
 
   group('PolygonObstacle', () {
     // A simple square polygon
-    final square = PolygonObstacle(
+    const square = PolygonObstacle(
       points: [
         (x: 100.0, y: 100.0),
         (x: 200.0, y: 100.0),
@@ -117,12 +117,12 @@ void main() {
       final interval = square.horizontalBlockAt(140, 160);
       expect(interval, isNotNull);
       expect(interval!.left, closeTo(100, 2));
-      expect(interval!.right, closeTo(200, 2));
+      expect(interval.right, closeTo(200, 2));
     });
 
     // A triangle
     test('triangle narrows toward apex', () {
-      final triangle = PolygonObstacle(
+      const triangle = PolygonObstacle(
         points: [
           (x: 150.0, y: 100.0), // apex
           (x: 200.0, y: 200.0), // bottom right

@@ -1,5 +1,6 @@
 import 'package:flutter/painting.dart';
 
+import 'package:pretext/src/document/attributed_span.dart';
 import 'package:pretext/src/document/block.dart';
 import 'package:pretext/src/document/document.dart';
 import 'package:pretext/src/document/document_cursor.dart';

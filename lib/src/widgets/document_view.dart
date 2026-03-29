@@ -1,7 +1,6 @@
 import 'package:flutter/widgets.dart';
 
 import 'package:pretext/src/layout/layout_config.dart';
-import 'package:pretext/src/layout/layout_result.dart';
 import 'package:pretext/src/layout/page_layout.dart';
 import 'package:pretext/src/document/document.dart';
 import 'package:pretext/src/document/document_cursor.dart';

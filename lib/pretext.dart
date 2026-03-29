@@ -3,7 +3,7 @@
 /// Provides pagination, multi-column flow, obstacle-aware text wrapping,
 /// and rich document rendering — all using Flutter's native text engine
 /// (dart:ui Paragraph + HarfBuzz/ICU). Zero WebView. Zero JS.
-library pretext;
+library;
 
 // Document model
 export 'src/document/document.dart';

@@ -1,4 +1,3 @@
-import 'package:pretext/src/document/block.dart';
 import 'package:pretext/src/document/document.dart';
 
 /// A position within a [Document].
